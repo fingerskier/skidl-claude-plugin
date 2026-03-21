@@ -59,7 +59,7 @@ def add_part(
             "library": library,
             "name": name,
             "value": value,
-            "footprint": str(part.footprint) if part.footprint else "",
+            "footprint": str(getattr(part, "footprint", "") or ""),
             "pin_count": len(pins),
             "pins": pins,
             "message": f"Part {assigned_ref} ({name}) added to circuit '{entry.name}'.",
@@ -124,8 +124,8 @@ def list_parts(circuit_name: str = "") -> dict:
             parts.append({
                 "ref": ref,
                 "name": part.name,
-                "value": str(part.value) if part.value else "",
-                "footprint": str(part.footprint) if part.footprint else "",
+                "value": str(getattr(part, "value", "") or ""),
+                "footprint": str(getattr(part, "footprint", "") or ""),
                 "pin_count": len(part.pins),
             })
         return {
@@ -201,9 +201,9 @@ def get_part_info(ref: str) -> dict:
             "status": "ok",
             "ref": ref,
             "name": part.name,
-            "value": str(part.value) if part.value else "",
-            "footprint": str(part.footprint) if part.footprint else "",
-            "description": str(getattr(part, "description", "")),
+            "value": str(getattr(part, "value", "") or ""),
+            "footprint": str(getattr(part, "footprint", "") or ""),
+            "description": str(getattr(part, "description", "") or ""),
             "pins": pins,
         }
     except (KeyError, RuntimeError) as e:

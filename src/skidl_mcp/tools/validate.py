@@ -137,7 +137,7 @@ def validate_footprints() -> dict:
         without_footprint = []
 
         for ref, part in entry.parts.items():
-            fp = str(part.footprint) if part.footprint else ""
+            fp = str(getattr(part, "footprint", "") or "")
             if fp and fp != "None" and fp.strip():
                 with_footprint.append({"ref": ref, "name": part.name, "footprint": fp})
             else:

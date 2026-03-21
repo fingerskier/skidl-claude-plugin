@@ -1,9 +1,21 @@
 """Tests for MCP tool functions."""
 
 import pytest
+from skidl import SKIDL, Net, Part, Pin
 
 from skidl_mcp.circuit_manager import manager
-from skidl_mcp.tools import circuit, nets, generate, validate
+from skidl_mcp.tools import circuit, nets, parts, generate, validate
+
+
+def _make_part(entry, name="R", ref=None, pin_names=("p1", "p2"), footprint=""):
+    """Create a simple SKiDL part and register it in the circuit entry."""
+    pins = [Pin(num=i + 1, name=n) for i, n in enumerate(pin_names)]
+    p = Part(name=name, tool=SKIDL, pins=pins, circuit=entry.circuit)
+    if footprint:
+        p.footprint = footprint
+    assigned_ref = p.ref
+    entry.parts[assigned_ref] = p
+    return assigned_ref, p
 
 
 @pytest.fixture(autouse=True)
@@ -126,3 +138,165 @@ class TestValidateTools:
         circuit.create_circuit("c1")
         result = validate.validate_footprints()
         assert result["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Integration tests with real SKiDL Part objects (no KiCad required)
+# ---------------------------------------------------------------------------
+
+
+class TestPartTools:
+    def test_list_parts_empty(self):
+        circuit.create_circuit("c1")
+        result = parts.list_parts()
+        assert result["status"] == "ok"
+        assert result["count"] == 0
+
+    def test_list_parts_with_parts(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R")
+        _make_part(entry, name="C")
+        result = parts.list_parts()
+        assert result["status"] == "ok"
+        assert result["count"] == 2
+
+    def test_get_part_info(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R", pin_names=("p1", "p2"))
+        result = parts.get_part_info(ref)
+        assert result["status"] == "ok"
+        assert result["ref"] == ref
+        assert result["name"] == "R"
+        assert len(result["pins"]) == 2
+
+    def test_get_part_info_not_found(self):
+        circuit.create_circuit("c1")
+        result = parts.get_part_info("R99")
+        assert result["status"] == "error"
+
+    def test_remove_part(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R")
+        result = parts.remove_part(ref)
+        assert result["status"] == "removed"
+        assert parts.list_parts()["count"] == 0
+
+    def test_remove_part_not_found(self):
+        circuit.create_circuit("c1")
+        result = parts.remove_part("X99")
+        assert result["status"] == "error"
+
+
+class TestNetToolsWithParts:
+    def test_connect_pin_to_net(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R", pin_names=("p1", "p2"))
+        nets.create_net("VCC")
+        result = nets.connect("VCC", ref, "1")
+        assert result["status"] == "connected"
+        assert result["total_connections"] == 1
+
+    def test_connect_invalid_pin(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R", pin_names=("p1", "p2"))
+        nets.create_net("VCC")
+        result = nets.connect("VCC", ref, "99")
+        assert result["status"] == "error"
+        assert "not found" in result["message"]
+
+    def test_connect_pins_directly(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref1, _ = _make_part(entry, name="R")
+        ref2, _ = _make_part(entry, name="C")
+        result = nets.connect_pins(ref1, "1", ref2, "1")
+        assert result["status"] == "connected"
+        assert result["net"]  # auto-generated name
+
+    def test_connect_pins_with_named_net(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref1, _ = _make_part(entry, name="R")
+        ref2, _ = _make_part(entry, name="C")
+        result = nets.connect_pins(ref1, "1", ref2, "1", net_name="SIG")
+        assert result["status"] == "connected"
+        assert result["net"] == "SIG"
+
+
+class TestGenerateToolsWithParts:
+    def test_generate_bom_json(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R")
+        _make_part(entry, name="R")
+        _make_part(entry, name="C")
+        result = generate.generate_bom(output_format="json")
+        assert result["status"] == "ok"
+        assert result["total_parts"] == 3
+        assert result["unique_parts"] == 2  # R and C
+
+    def test_generate_bom_csv(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R")
+        result = generate.generate_bom(output_format="csv")
+        assert result["status"] == "ok"
+        assert "Qty" in result["content"]
+        assert "References" in result["content"]
+
+    def test_export_python(self):
+        circuit.create_circuit("c1", "test export")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R")
+        nets.create_net("VCC")
+        nets.connect("VCC", ref, "1")
+        result = generate.export_python()
+        assert result["status"] == "ok"
+        assert "from skidl import" in result["content"]
+        assert "Part(" in result["content"]
+        assert "Net(" in result["content"]
+
+
+class TestValidateToolsWithParts:
+    def test_check_connections_all_unconnected(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R", pin_names=("p1", "p2"))
+        result = validate.check_connections()
+        assert result["status"] == "ok"
+        assert result["fully_connected"] is False
+        assert result["unconnected_pins"] == 2
+
+    def test_check_connections_partial(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R", pin_names=("p1", "p2"))
+        nets.create_net("VCC")
+        nets.connect("VCC", ref, "1")
+        result = validate.check_connections()
+        assert result["status"] == "ok"
+        assert result["connected_pins"] == 1
+        assert result["unconnected_pins"] == 1
+
+    def test_validate_footprints_missing(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R")
+        result = validate.validate_footprints()
+        assert result["status"] == "ok"
+        assert result["all_valid"] is False
+        assert result["missing_count"] == 1
+
+    def test_validate_footprints_present(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R", footprint="Resistor_SMD:R_0805")
+        result = validate.validate_footprints()
+        assert result["status"] == "ok"
+        assert result["all_valid"] is True
+        assert result["valid_count"] == 1

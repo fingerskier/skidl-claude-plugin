@@ -100,10 +100,10 @@ def generate_bom(output_format: str = "json") -> dict:
         groups: dict[tuple, list[str]] = {}
         for ref, part in entry.parts.items():
             key = (
-                str(getattr(part, "lib", "")),
+                str(getattr(part, "lib", "") or ""),
                 part.name,
-                str(part.value) if part.value else "",
-                str(part.footprint) if part.footprint else "",
+                str(getattr(part, "value", "") or ""),
+                str(getattr(part, "footprint", "") or ""),
             )
             groups.setdefault(key, []).append(ref)
 
@@ -216,11 +216,14 @@ def export_python() -> dict:
         # Emit part definitions
         for ref, part in entry.parts.items():
             var_name = ref.lower().replace(".", "_")
-            args = [repr(str(getattr(part, "lib", "Device"))), repr(part.name)]
-            if part.value:
-                args.append(f"value={repr(str(part.value))}")
-            if part.footprint:
-                args.append(f"footprint={repr(str(part.footprint))}")
+            lib = str(getattr(part, "lib", "Device") or "Device")
+            value = str(getattr(part, "value", "") or "")
+            footprint = str(getattr(part, "footprint", "") or "")
+            args = [repr(lib), repr(part.name)]
+            if value:
+                args.append(f"value={repr(value)}")
+            if footprint:
+                args.append(f"footprint={repr(footprint)}")
             args.append(f"ref={repr(ref)}")
             lines.append(f"{var_name} = Part({', '.join(args)})")
 
