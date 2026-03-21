@@ -81,6 +81,11 @@ class CircuitManager:
         self._circuits: dict[str, CircuitEntry] = {}
         self._active: str | None = None
 
+    def reset(self) -> None:
+        """Clear all circuits and reset state. Useful for testing."""
+        self._circuits.clear()
+        self._active = None
+
     @property
     def active_name(self) -> str | None:
         return self._active

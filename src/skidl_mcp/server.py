@@ -227,13 +227,13 @@ def generate_svg() -> dict:
 
 
 @mcp.tool()
-def generate_bom(format: str = "json") -> dict:
+def generate_bom(output_format: str = "json") -> dict:
     """Generate a Bill of Materials (BOM) for the active circuit.
 
     Args:
-        format: Output format - "json" for structured data, "csv" for spreadsheet.
+        output_format: Output format - "json" for structured data, "csv" for spreadsheet.
     """
-    return generate.generate_bom(format)
+    return generate.generate_bom(output_format)
 
 
 @mcp.tool()

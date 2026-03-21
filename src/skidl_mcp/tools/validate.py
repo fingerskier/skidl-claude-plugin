@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
-import sys
 
 from skidl_mcp.circuit_manager import manager
 
@@ -26,17 +26,11 @@ def run_erc() -> dict:
         if not entry.parts:
             return {"status": "error", "message": "Circuit has no parts. Add parts before running ERC."}
 
-        # Capture ERC output (SKiDL prints to stderr)
-        old_stderr = sys.stderr
-        old_stdout = sys.stdout
-        sys.stderr = captured_err = io.StringIO()
-        sys.stdout = captured_out = io.StringIO()
-
-        try:
+        # Capture ERC output (SKiDL prints to stderr and stdout)
+        captured_out = io.StringIO()
+        captured_err = io.StringIO()
+        with contextlib.redirect_stdout(captured_out), contextlib.redirect_stderr(captured_err):
             erc_result = entry.circuit.ERC()
-        finally:
-            sys.stderr = old_stderr
-            sys.stdout = old_stdout
 
         erc_output = captured_err.getvalue() + captured_out.getvalue()
 

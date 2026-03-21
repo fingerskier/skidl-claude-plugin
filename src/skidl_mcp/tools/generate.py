@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 import os
-import sys
 import tempfile
-from collections import Counter
 
 from skidl_mcp.circuit_manager import manager
 
@@ -34,7 +33,8 @@ def generate_netlist() -> dict:
             with open(tmp_path, "r") as f:
                 netlist_content = f.read()
         finally:
-            os.unlink(tmp_path)
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
         return {
             "status": "ok",
@@ -81,11 +81,11 @@ def generate_svg() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def generate_bom(format: str = "json") -> dict:
+def generate_bom(output_format: str = "json") -> dict:
     """Generate a Bill of Materials (BOM) for the active circuit.
 
     Args:
-        format: Output format - "json" for structured data, "csv" for spreadsheet-compatible.
+        output_format: Output format - "json" for structured data, "csv" for spreadsheet-compatible.
 
     Returns:
         BOM listing all unique parts with quantities and details.
@@ -121,18 +121,26 @@ def generate_bom(format: str = "json") -> dict:
         # Sort by reference
         bom_items.sort(key=lambda x: x["references"][0])
 
-        if format == "csv":
-            lines = ["Qty,References,Name,Value,Footprint,Library"]
+        if output_format == "csv":
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["Qty", "References", "Name", "Value", "Footprint", "Library"])
             for item in bom_items:
-                refs_str = " ".join(item["references"])
-                lines.append(f"{item['quantity']},{refs_str},{item['name']},{item['value']},{item['footprint']},{item['library']}")
-            content = "\n".join(lines)
+                writer.writerow([
+                    item["quantity"],
+                    " ".join(item["references"]),
+                    item["name"],
+                    item["value"],
+                    item["footprint"],
+                    item["library"],
+                ])
+            content = buf.getvalue()
         else:
             content = json.dumps(bom_items, indent=2)
 
         return {
             "status": "ok",
-            "format": format,
+            "format": output_format,
             "content": content,
             "unique_parts": len(bom_items),
             "total_parts": len(entry.parts),

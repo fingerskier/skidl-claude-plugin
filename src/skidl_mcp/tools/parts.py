@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import sys
-from typing import Optional
 
 from skidl import KICAD, Part, search
 
@@ -80,23 +80,22 @@ def search_parts(query: str, library: str = "") -> dict:
     """
     try:
         # Capture SKiDL search output
-        old_stdout = sys.stdout
-        sys.stdout = captured = io.StringIO()
-
-        if library:
-            search(query, lib_search_paths_=None)
-        else:
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
             search(query)
 
-        sys.stdout = old_stdout
         output = captured.getvalue()
 
         # Parse search results
         results = []
         for line in output.strip().split("\n"):
             line = line.strip()
-            if line and not line.startswith("Search"):
-                results.append(line)
+            if not line or line.startswith("Search"):
+                continue
+            # Filter by library name if specified
+            if library and library.lower() not in line.lower():
+                continue
+            results.append(line)
 
         return {
             "status": "ok",
@@ -106,7 +105,6 @@ def search_parts(query: str, library: str = "") -> dict:
             "count": len(results),
         }
     except Exception as e:
-        sys.stdout = old_stdout if 'old_stdout' in dir() else sys.stdout
         return {"status": "error", "message": str(e)}
 
 

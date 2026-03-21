@@ -142,11 +142,12 @@ def _parse_library_parts(lib_file: str) -> list[str]:
         if lib_file.endswith(".kicad_sym"):
             # KiCad 6+ s-expression format
             import re
-            # Match (symbol "PartName" ...)
+            # Match top-level (symbol "PartName" ...) declarations.
+            # Sub-symbols use the pattern "ParentName_N_SubName" where N is
+            # a digit — skip those to only list top-level parts.
             for match in re.finditer(r'\(symbol\s+"([^"]+)"', content):
                 name = match.group(1)
-                # Skip sub-symbols (contain _0_, _1_ etc.)
-                if "_0_" not in name and "_1_" not in name:
+                if not re.search(r'_\d+_', name):
                     parts.append(name)
         else:
             # Legacy .lib format
