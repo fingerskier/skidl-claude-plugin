@@ -18,3 +18,4 @@ env/
 output/
 *.kicad_sch
 *.kicad_pcb
+skidl_REPL.*
