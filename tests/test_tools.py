@@ -300,3 +300,29 @@ class TestValidateToolsWithParts:
         assert result["status"] == "ok"
         assert result["all_valid"] is True
         assert result["valid_count"] == 1
+
+
+class TestCircuitEntrySummary:
+    """Verify CircuitEntry.summary() handles SKIDL-tool parts without AttributeError."""
+
+    def test_summary_with_skidl_parts(self):
+        circuit.create_circuit("c1", "summary test")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R", pin_names=("p1", "p2"))
+        result = entry.summary()
+        assert result["name"] == "c1"
+        assert result["parts_count"] == 1
+        # value/footprint should be None for bare SKIDL parts
+        part_info = result["parts"][0]
+        assert part_info["ref"] == ref
+        assert part_info["pin_count"] == 2
+
+    def test_summary_with_nets_and_connections(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R", pin_names=("p1", "p2"))
+        nets.create_net("VCC")
+        nets.connect("VCC", ref, "1")
+        result = entry.summary()
+        assert result["nets_count"] == 1
+        assert len(result["nets"][0]["connections"]) == 1

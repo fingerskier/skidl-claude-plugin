@@ -33,8 +33,8 @@ class CircuitEntry:
             parts_info.append({
                 "ref": ref,
                 "name": part.name,
-                "value": str(part.value) if part.value else None,
-                "footprint": str(part.footprint) if part.footprint else None,
+                "value": str(getattr(part, "value", "")) or None,
+                "footprint": str(getattr(part, "footprint", "")) or None,
                 "library": str(getattr(part, "lib", None)),
                 "pin_count": len(part.pins),
             })
@@ -43,7 +43,10 @@ class CircuitEntry:
         for name, net in self.nets.items():
             pins = []
             for pin in net.pins:
-                pins.append(f"{pin.part.ref}:{pin.name}")
+                try:
+                    pins.append(f"{pin.part.ref}:{pin.name}")
+                except (AttributeError, TypeError):
+                    pins.append("unknown:unknown")
             nets_info.append({
                 "name": name,
                 "connections": pins,
