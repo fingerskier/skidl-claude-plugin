@@ -60,7 +60,7 @@ def run_erc() -> dict:
             "raw_output": erc_output.strip(),
             "message": "ERC passed." if passed else f"ERC failed with {len(errors)} error(s) and {len(warnings)} warning(s).",
         }
-    except (RuntimeError, Exception) as e:
+    except RuntimeError as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -115,7 +115,7 @@ def check_connections() -> dict:
                 else f"{total_pins - connected_pins} unconnected pin(s) across {len(unconnected_by_part)} part(s)."
             ),
         }
-    except (RuntimeError, Exception) as e:
+    except RuntimeError as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -158,5 +158,5 @@ def validate_footprints() -> dict:
                 else f"{len(without_footprint)} part(s) missing footprints: {[p['ref'] for p in without_footprint]}"
             ),
         }
-    except (RuntimeError, Exception) as e:
+    except RuntimeError as e:
         return {"status": "error", "message": str(e)}

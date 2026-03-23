@@ -28,7 +28,7 @@ def create_net(name: str) -> dict:
             "circuit": entry.name,
             "message": f"Net '{name}' created in circuit '{entry.name}'.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -72,7 +72,7 @@ def connect(net_name: str, ref: str, pin: str) -> dict:
             "total_connections": len(net.pins),
             "message": f"Connected {ref} pin {target_pin.num}({target_pin.name}) to net '{net_name}'.",
         }
-    except (KeyError, RuntimeError, Exception) as e:
+    except (KeyError, RuntimeError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -124,7 +124,7 @@ def connect_pins(ref1: str, pin1: str, ref2: str, pin2: str, net_name: str = "")
             "pin2": f"{ref2}:{p2.num}({p2.name})",
             "message": f"Connected {ref1}:{p1.name} to {ref2}:{p2.name} via net '{net_name}'.",
         }
-    except (KeyError, RuntimeError, Exception) as e:
+    except (KeyError, RuntimeError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -191,7 +191,7 @@ def create_bus(name: str, width: int) -> dict:
             "net_names": net_names,
             "message": f"Bus '{name}' with {width} nets created.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, KeyError, ValueError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -221,7 +221,7 @@ def add_power_nets() -> dict:
             "skipped": skipped,
             "message": f"Power nets created: {created}. Already existed: {skipped}.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}
 
 

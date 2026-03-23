@@ -64,7 +64,7 @@ def add_part(
             "pins": pins,
             "message": f"Part {assigned_ref} ({name}) added to circuit '{entry.name}'.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, KeyError, ValueError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -104,7 +104,7 @@ def search_parts(query: str, library: str = "") -> dict:
             "results": results,
             "count": len(results),
         }
-    except Exception as e:
+    except (RuntimeError, ValueError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -165,7 +165,7 @@ def remove_part(ref: str) -> dict:
             "ref": ref,
             "message": f"Part {ref} removed from circuit '{entry.name}'.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}
 
 

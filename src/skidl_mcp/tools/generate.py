@@ -44,7 +44,7 @@ def generate_netlist() -> dict:
             "nets_count": len(entry.nets),
             "message": f"Netlist generated for circuit '{entry.name}' with {len(entry.parts)} parts and {len(entry.nets)} nets.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, FileNotFoundError, OSError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -77,7 +77,7 @@ def generate_svg() -> dict:
             "content": svg_content,
             "message": f"SVG schematic generated for circuit '{entry.name}'.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, FileNotFoundError, OSError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -146,7 +146,7 @@ def generate_bom(output_format: str = "json") -> dict:
             "total_parts": len(entry.parts),
             "message": f"BOM generated: {len(bom_items)} unique parts, {len(entry.parts)} total.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -181,7 +181,7 @@ def generate_kicad_schematic() -> dict:
             "content": content,
             "message": f"KiCad schematic generated for circuit '{entry.name}'.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, FileNotFoundError, OSError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -258,5 +258,5 @@ def export_python() -> dict:
             "content": code,
             "message": f"Python SKiDL code exported for circuit '{entry.name}'.",
         }
-    except (RuntimeError, Exception) as e:
+    except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}
