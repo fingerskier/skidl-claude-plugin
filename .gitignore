@@ -19,3 +19,7 @@ output/
 *.kicad_sch
 *.kicad_pcb
 skidl_REPL.*
+.claude/
+__main__.erc
+__main__.log
+bash.exe.stackdump
