@@ -326,3 +326,60 @@ class TestCircuitEntrySummary:
         result = entry.summary()
         assert result["nets_count"] == 1
         assert len(result["nets"][0]["connections"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Input validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestInputValidation:
+    """Verify that invalid inputs are rejected with clear error messages."""
+
+    def test_create_circuit_empty_name(self):
+        result = circuit.create_circuit("")
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+    def test_create_circuit_whitespace_name(self):
+        result = circuit.create_circuit("   ")
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+    def test_create_net_empty_name(self):
+        circuit.create_circuit("c1")
+        result = nets.create_net("")
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+    def test_create_net_whitespace_name(self):
+        circuit.create_circuit("c1")
+        result = nets.create_net("  ")
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+    def test_create_bus_empty_name(self):
+        circuit.create_circuit("c1")
+        result = nets.create_bus("", 8)
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+    def test_create_bus_zero_width(self):
+        circuit.create_circuit("c1")
+        result = nets.create_bus("DATA", 0)
+        assert result["status"] == "error"
+        assert "positive" in result["message"].lower()
+
+    def test_create_bus_negative_width(self):
+        circuit.create_circuit("c1")
+        result = nets.create_bus("DATA", -1)
+        assert result["status"] == "error"
+        assert "positive" in result["message"].lower()
+
+    def test_generate_bom_invalid_format(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R")
+        result = generate.generate_bom(output_format="xml")
+        assert result["status"] == "error"
+        assert "invalid format" in result["message"].lower()

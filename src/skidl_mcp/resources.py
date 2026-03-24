@@ -86,7 +86,7 @@ def get_library_parts(lib_name: str) -> str:
             "count": len(parts),
         }, indent=2)
 
-    except Exception as e:
+    except (ImportError, FileNotFoundError, IOError, ValueError, KeyError) as e:
         return json.dumps({"error": str(e)})
 
 
@@ -126,7 +126,7 @@ def _find_kicad_lib_paths() -> list[str]:
         for p in lib_search_paths.get(KICAD, []):
             if p not in paths:
                 paths.append(str(p))
-    except Exception:
+    except (ImportError, AttributeError):
         pass
 
     return paths
@@ -156,7 +156,7 @@ def _parse_library_parts(lib_file: str) -> list[str]:
                     tokens = line.split()
                     if len(tokens) >= 2:
                         parts.append(tokens[1])
-    except Exception:
+    except (IOError, OSError, UnicodeDecodeError):
         pass
 
     return sorted(set(parts))

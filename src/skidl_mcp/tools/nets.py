@@ -16,6 +16,9 @@ def create_net(name: str) -> dict:
     Returns:
         Confirmation with net details.
     """
+    if not name or not name.strip():
+        return {"status": "error", "message": "Net name cannot be empty."}
+
     try:
         entry = manager.get_active()
         if name in entry.nets:
@@ -169,6 +172,11 @@ def create_bus(name: str, width: int) -> dict:
     Returns:
         Bus details with individual net names.
     """
+    if not name or not name.strip():
+        return {"status": "error", "message": "Bus name cannot be empty."}
+    if width <= 0:
+        return {"status": "error", "message": "Bus width must be a positive integer."}
+
     try:
         entry = manager.get_active()
         if name in entry.buses:

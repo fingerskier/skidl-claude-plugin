@@ -90,6 +90,10 @@ def generate_bom(output_format: str = "json") -> dict:
     Returns:
         BOM listing all unique parts with quantities and details.
     """
+    valid_formats = ("json", "csv")
+    if output_format not in valid_formats:
+        return {"status": "error", "message": f"Invalid format '{output_format}'. Must be one of: {', '.join(valid_formats)}."}
+
     try:
         entry = manager.get_active()
 

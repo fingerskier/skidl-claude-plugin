@@ -15,6 +15,9 @@ def create_circuit(name: str, description: str = "") -> dict:
     Returns:
         Confirmation with circuit metadata.
     """
+    if not name or not name.strip():
+        return {"status": "error", "message": "Circuit name cannot be empty."}
+
     try:
         entry = manager.create(name, description)
         return {
