@@ -438,4 +438,4 @@ class TestSummaryLibraryField:
         _make_part(entry, name="R", pin_names=("p1", "p2"))
         result = entry.summary()
         lib_value = result["parts"][0]["library"]
-        assert lib_value is None or isinstance(lib_value, str) and lib_value != "None"
+        assert lib_value is None

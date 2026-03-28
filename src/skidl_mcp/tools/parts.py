@@ -41,7 +41,11 @@ def add_part(
         if ref:
             kwargs["ref"] = ref
 
-        part = Part(library, name, circuit=entry.circuit, **kwargs)
+        try:
+            part = Part(library, name, circuit=entry.circuit, **kwargs)
+        except (FileNotFoundError, AttributeError, OSError) as e:
+            return {"status": "error", "message": str(e)}
+
         assigned_ref = part.ref
         entry.parts[assigned_ref] = part
 
@@ -64,7 +68,7 @@ def add_part(
             "pins": pins,
             "message": f"Part {assigned_ref} ({name}) added to circuit '{entry.name}'.",
         }
-    except (RuntimeError, KeyError, ValueError, FileNotFoundError, AttributeError, OSError) as e:
+    except (RuntimeError, KeyError, ValueError) as e:
         return {"status": "error", "message": str(e)}
 
 

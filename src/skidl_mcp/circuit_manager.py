@@ -33,8 +33,8 @@ class CircuitEntry:
             parts_info.append({
                 "ref": ref,
                 "name": part.name,
-                "value": str(getattr(part, "value", "")) or None,
-                "footprint": str(getattr(part, "footprint", "")) or None,
+                "value": str(v) if (v := getattr(part, "value", None)) is not None else None,
+                "footprint": str(fp) if (fp := getattr(part, "footprint", None)) is not None else None,
                 "library": str(lib) if (lib := getattr(part, "lib", None)) is not None else None,
                 "pin_count": len(part.pins),
             })
