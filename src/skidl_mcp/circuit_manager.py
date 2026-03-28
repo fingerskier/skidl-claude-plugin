@@ -35,7 +35,7 @@ class CircuitEntry:
                 "name": part.name,
                 "value": str(getattr(part, "value", "")) or None,
                 "footprint": str(getattr(part, "footprint", "")) or None,
-                "library": str(getattr(part, "lib", None)),
+                "library": str(lib) if (lib := getattr(part, "lib", None)) is not None else None,
                 "pin_count": len(part.pins),
             })
 

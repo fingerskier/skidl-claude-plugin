@@ -64,7 +64,7 @@ def add_part(
             "pins": pins,
             "message": f"Part {assigned_ref} ({name}) added to circuit '{entry.name}'.",
         }
-    except (RuntimeError, KeyError, ValueError) as e:
+    except (RuntimeError, KeyError, ValueError, FileNotFoundError, AttributeError, OSError) as e:
         return {"status": "error", "message": str(e)}
 
 
@@ -78,6 +78,9 @@ def search_parts(query: str, library: str = "") -> dict:
     Returns:
         List of matching parts with library, name, and description.
     """
+    if not query or not query.strip():
+        return {"status": "error", "message": "Search query cannot be empty."}
+
     try:
         # Capture SKiDL search output
         captured = io.StringIO()
@@ -104,7 +107,7 @@ def search_parts(query: str, library: str = "") -> dict:
             "results": results,
             "count": len(results),
         }
-    except (RuntimeError, ValueError) as e:
+    except (RuntimeError, ValueError, FileNotFoundError, OSError) as e:
         return {"status": "error", "message": str(e)}
 
 

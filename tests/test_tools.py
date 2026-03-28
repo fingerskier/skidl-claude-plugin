@@ -383,3 +383,59 @@ class TestInputValidation:
         result = generate.generate_bom(output_format="xml")
         assert result["status"] == "error"
         assert "invalid format" in result["message"].lower()
+
+    def test_search_parts_empty_query(self):
+        result = parts.search_parts("")
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+    def test_search_parts_whitespace_query(self):
+        result = parts.search_parts("   ")
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+
+class TestExportPythonVarNames:
+    """Verify export_python generates unique, valid Python variable names."""
+
+    def test_export_python_no_var_collisions(self):
+        """Parts with refs that differ only by punctuation get unique variables."""
+        circuit.create_circuit("c1", "collision test")
+        entry = manager.get_active()
+        # Create parts whose refs would collide under naive substitution
+        _make_part(entry, name="R", pin_names=("p1",))
+        _make_part(entry, name="R", pin_names=("p1",))
+        result = generate.export_python()
+        assert result["status"] == "ok"
+        code = result["content"]
+        # Each Part() line should have a distinct variable name
+        part_lines = [l for l in code.split("\n") if "= Part(" in l]
+        var_names = [l.split("=")[0].strip() for l in part_lines]
+        assert len(var_names) == len(set(var_names)), f"Duplicate variable names: {var_names}"
+
+    def test_export_python_valid_identifiers(self):
+        """Generated variable names should be valid Python identifiers."""
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R", pin_names=("p1",))
+        nets.create_net("+3V3")
+        result = generate.export_python()
+        assert result["status"] == "ok"
+        code = result["content"]
+        # Check that net variable is valid
+        net_lines = [l for l in code.split("\n") if "= Net(" in l]
+        for line in net_lines:
+            var_name = line.split("=")[0].strip()
+            assert var_name.isidentifier(), f"Invalid identifier: {var_name}"
+
+
+class TestSummaryLibraryField:
+    """Verify CircuitEntry.summary() returns None (not string 'None') for missing library."""
+
+    def test_summary_library_is_none_not_string(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R", pin_names=("p1", "p2"))
+        result = entry.summary()
+        lib_value = result["parts"][0]["library"]
+        assert lib_value is None or isinstance(lib_value, str) and lib_value != "None"

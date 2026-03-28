@@ -5,10 +5,29 @@ from __future__ import annotations
 import csv
 import io
 import json
+import keyword
 import os
+import re
 import tempfile
 
 from skidl_mcp.circuit_manager import manager
+
+
+def _to_python_var(name: str, seen: set[str]) -> str:
+    """Convert a part ref or net name to a unique, valid Python identifier."""
+    var = re.sub(r"[^a-zA-Z0-9_]", "_", name.lower().replace("+", "p").replace("-", "n"))
+    if not var or var[0].isdigit():
+        var = f"_{var}"
+    if keyword.iskeyword(var):
+        var = f"{var}_"
+    # Ensure uniqueness
+    base = var
+    counter = 2
+    while var in seen:
+        var = f"{base}_{counter}"
+        counter += 1
+    seen.add(var)
+    return var
 
 
 def generate_netlist() -> dict:
@@ -217,9 +236,15 @@ def export_python() -> dict:
             "# --- Parts ---",
         ]
 
+        # Build unique variable name mappings
+        seen_vars: set[str] = set()
+        part_vars: dict[str, str] = {}  # ref -> var_name
+        net_vars: dict[str, str] = {}   # net name -> var_name
+
         # Emit part definitions
         for ref, part in entry.parts.items():
-            var_name = ref.lower().replace(".", "_")
+            var_name = _to_python_var(ref, seen_vars)
+            part_vars[ref] = var_name
             lib = str(getattr(part, "lib", "Device") or "Device")
             value = str(getattr(part, "value", "") or "")
             footprint = str(getattr(part, "footprint", "") or "")
@@ -236,7 +261,8 @@ def export_python() -> dict:
 
         # Emit net definitions
         for name, net in entry.nets.items():
-            var_name = name.lower().replace("+", "p").replace("-", "n").replace(".", "_")
+            var_name = _to_python_var(name, seen_vars)
+            net_vars[name] = var_name
             lines.append(f"{var_name} = Net({repr(name)})")
 
         lines.append("")
@@ -244,10 +270,10 @@ def export_python() -> dict:
 
         # Emit connections
         for name, net in entry.nets.items():
-            var_name = name.lower().replace("+", "p").replace("-", "n").replace(".", "_")
+            nvar = net_vars[name]
             for pin in net.pins:
-                part_var = pin.part.ref.lower().replace(".", "_")
-                lines.append(f"{var_name} += {part_var}[{repr(str(pin.num))}]  # {pin.name}")
+                pvar = part_vars.get(pin.part.ref, pin.part.ref.lower())
+                lines.append(f"{nvar} += {pvar}[{repr(str(pin.num))}]  # {pin.name}")
 
         lines.append("")
         lines.append("# --- Generate outputs ---")
