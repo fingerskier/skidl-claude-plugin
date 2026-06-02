@@ -1,0 +1,12 @@
+{
+  "name": "skidl",
+  "version": "2026.6.2",
+  "description": "Design electronic schematics and PCB layouts using SKiDL — create circuits with Python code, validate designs, and export to KiCad.",
+  "author": {
+    "name": "Fingerskier"
+  },
+  "repository": "https://github.com/fingerskier/skidl-claude-plugin",
+  "license": "MIT",
+  "keywords": ["skidl", "electronics", "schematic", "pcb", "kicad", "eda", "mcp"],
+  "mcpServers": "./.mcp.json"
+}

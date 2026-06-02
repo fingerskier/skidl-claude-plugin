@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "skidl": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/fingerskier/skidl-claude-plugin",
+        "skidl-mcp"
+      ]
+    }
+  }
+}
