@@ -6,7 +6,8 @@ import contextlib
 import io
 import sys
 
-from skidl import KICAD, Part, search
+from skidl import KICAD, Part
+from skidl import search_parts as _skidl_search_parts
 
 from skidl_mcp.circuit_manager import manager
 
@@ -43,8 +44,18 @@ def add_part(
 
         try:
             part = Part(library, name, circuit=entry.circuit, **kwargs)
-        except (FileNotFoundError, AttributeError, OSError) as e:
-            return {"status": "error", "message": str(e)}
+        except Exception as e:
+            # SKiDL signals missing libraries/parts (and KiCad symbol-table
+            # problems) through a variety of exception types, so catch broadly
+            # at this external-library boundary and return a clean error.
+            return {
+                "status": "error",
+                "message": (
+                    f"Could not add part '{name}' from library '{library}': {e}. "
+                    "Check the library and part names (use search_parts) and that "
+                    "KiCad symbol libraries are installed."
+                ),
+            }
 
         assigned_ref = part.ref
         entry.parts[assigned_ref] = part
@@ -85,24 +96,42 @@ def search_parts(query: str, library: str = "") -> dict:
     if not query or not query.strip():
         return {"status": "error", "message": "Search query cannot be empty."}
 
+    # Tab-delimited fields let us parse SKiDL's results structurally instead of
+    # scraping free-form console text. The field names match SKiDL's search API.
+    fmt = "{lib_name}\t{part_name}\t{description}"
+
     try:
-        # Capture SKiDL search output
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            search(query)
+        buf = io.StringIO()
+        try:
+            _skidl_search_parts(query, fmt=fmt, file=buf)
+        except TypeError:
+            # Older/newer SKiDL without fmt/file kwargs: fall back to stdout.
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _skidl_search_parts(query)
 
-        output = captured.getvalue()
-
-        # Parse search results
         results = []
-        for line in output.strip().split("\n"):
-            line = line.strip()
-            if not line or line.startswith("Search"):
+        for line in buf.getvalue().splitlines():
+            line = line.rstrip()
+            if not line:
                 continue
-            # Filter by library name if specified
-            if library and library.lower() not in line.lower():
-                continue
-            results.append(line)
+            fields = line.split("\t", 2)
+            if len(fields) >= 2:
+                lib_name, part_name = fields[0], fields[1]
+                description = fields[2] if len(fields) > 2 else ""
+                # Filter on the library field specifically (forgiving substring).
+                if library and library.lower() not in lib_name.lower():
+                    continue
+                results.append({
+                    "library": lib_name,
+                    "name": part_name,
+                    "description": description,
+                })
+            else:
+                # Unstructured fallback line (stdout path or unexpected format).
+                if library and library.lower() not in line.lower():
+                    continue
+                results.append({"library": "", "name": line, "description": ""})
 
         return {
             "status": "ok",
@@ -111,8 +140,9 @@ def search_parts(query: str, library: str = "") -> dict:
             "results": results,
             "count": len(results),
         }
-    except (RuntimeError, ValueError, FileNotFoundError, OSError) as e:
-        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        # Loading/parsing KiCad libraries can fail in many ways; surface cleanly.
+        return {"status": "error", "message": f"Search failed: {e}"}
 
 
 def list_parts(circuit_name: str = "") -> dict:

@@ -25,7 +25,8 @@ mcp = FastMCP(
         "libraries, wire them together with nets, validate with ERC, and generate "
         "schematics (SVG), netlists (KiCad), and bills of materials. "
         "Start by creating a circuit, then add parts and connect them. "
-        "Requires KiCad installed locally for component libraries."
+        "A local KiCad install is required only for adding parts and searching "
+        "component libraries; circuit building, validation, and export work without it."
     ),
 )
 
@@ -415,7 +416,7 @@ def list_design_templates() -> str:
         "Analog": ["voltage_divider", "amplifier", "filter", "oscillator"],
         "Power": ["power_supply", "led_circuit", "battery_charger"],
         "Digital": ["microcontroller", "logic_level_shifter", "i2c_bus", "spi_bus"],
-        "Sensor/Interface": ["sensor_interface", "motor_driver", "uart_interface", "usb_interface"],
+        "Interface": ["sensor_interface", "motor_driver", "uart_interface", "usb_interface"],
         "RF": ["antenna_matching"],
     }
     for category, keywords in categories.items():

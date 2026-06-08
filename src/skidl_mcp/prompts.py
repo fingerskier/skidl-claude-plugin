@@ -109,6 +109,13 @@ Steps for 555 astable:
 3. Wire: VCC to pin 8, GND to pin 1, R1 from VCC to pin 7, R2 from pin 7 to pins 2&6, C from pins 2&6 to GND
 4. Pin 4 (Reset) to VCC, Pin 5 (Control) via 10nF to GND
 
+Steps for 555 monostable (one-shot):
+1. Interpret the frequency value as the desired output pulse width (t = 1/f seconds)
+2. Calculate timing R and C: t = 1.1 * R * C
+3. Add 555 timer IC, timing resistor and capacitor, bypass cap
+4. Wire: VCC to pin 8, GND to pin 1, R from VCC to pins 6&7, C from pins 6&7 to GND
+5. Trigger input on pin 2 (active-low), output on pin 3, Pin 4 (Reset) to VCC, Pin 5 (Control) via 10nF to GND
+
 Steps for crystal oscillator:
 1. Select crystal and load capacitors (C_load specified in crystal datasheet)
 2. Calculate load caps: C1 = C2 = 2*C_load - C_stray (typically 5pF stray)
@@ -509,13 +516,16 @@ def get_prompt(name: str, **kwargs) -> str:
     prompt_def = PROMPTS[name]
     template = prompt_def["template"]
 
-    # Fill in provided arguments, leave placeholders for missing optional ones
+    # Fill in provided arguments. Empty/missing optional args render as
+    # "(not specified)" — callers (e.g. the MCP wrappers) pass "" defaults,
+    # so an empty value is treated the same as an omitted one.
     for arg in prompt_def.get("arguments", []):
         arg_name = arg["name"]
-        if arg_name in kwargs:
-            template = template.replace("{" + arg_name + "}", str(kwargs[arg_name]))
+        value = kwargs.get(arg_name, "")
+        if value not in (None, ""):
+            template = template.replace("{" + arg_name + "}", str(value))
         elif not arg.get("required", False):
-            template = template.replace("{" + arg_name + "}", f"(not specified)")
+            template = template.replace("{" + arg_name + "}", "(not specified)")
 
     return template
 

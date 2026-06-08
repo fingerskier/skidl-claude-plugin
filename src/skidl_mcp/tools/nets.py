@@ -113,10 +113,16 @@ def connect_pins(ref1: str, pin1: str, ref2: str, pin2: str, net_name: str = "")
                 net = Net(net_name, circuit=entry.circuit)
                 entry.nets[net_name] = net
         else:
+            # Ensure the auto-generated name doesn't clobber an existing net
             auto_name = f"{ref1}_{pin1}__{ref2}_{pin2}"
-            net = Net(auto_name, circuit=entry.circuit)
-            entry.nets[auto_name] = net
-            net_name = auto_name
+            unique_name = auto_name
+            suffix = 2
+            while unique_name in entry.nets:
+                unique_name = f"{auto_name}_{suffix}"
+                suffix += 1
+            net = Net(unique_name, circuit=entry.circuit)
+            entry.nets[unique_name] = net
+            net_name = unique_name
 
         net += p1, p2
 
@@ -204,7 +210,7 @@ def create_bus(name: str, width: int) -> dict:
 
 
 def add_power_nets() -> dict:
-    """Add standard power nets (VCC, GND, +3V3, +5V) to the active circuit.
+    """Add standard power nets (VCC, GND, +3V3, +5V, +12V) to the active circuit.
 
     Returns:
         List of created power nets.

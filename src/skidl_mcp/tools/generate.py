@@ -8,6 +8,7 @@ import json
 import keyword
 import os
 import re
+import shutil
 import tempfile
 
 from skidl_mcp.circuit_manager import manager
@@ -75,29 +76,43 @@ def generate_svg() -> dict:
     """
     try:
         entry = manager.get_active()
-
-        if not entry.parts:
-            return {"status": "error", "message": "Circuit has no parts. Add parts before generating a schematic."}
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".svg", delete=False) as f:
-            tmp_path = f.name
-
-        try:
-            entry.circuit.generate_svg(file_=tmp_path)
-            with open(tmp_path, "r") as f:
-                svg_content = f.read()
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-        return {
-            "status": "ok",
-            "format": "svg",
-            "content": svg_content,
-            "message": f"SVG schematic generated for circuit '{entry.name}'.",
-        }
-    except (RuntimeError, FileNotFoundError, OSError) as e:
+    except RuntimeError as e:
         return {"status": "error", "message": str(e)}
+
+    if not entry.parts:
+        return {"status": "error", "message": "Circuit has no parts. Add parts before generating a schematic."}
+
+    # SKiDL's generate_svg treats file_ as a *basename* and appends ".svg"
+    # (also writing .json/_skin.svg intermediates), so pass a directory-scoped
+    # basename without extension and read back basename + ".svg".
+    tmp_dir = tempfile.mkdtemp(prefix="skidl_svg_")
+    basename = os.path.join(tmp_dir, "schematic")
+    try:
+        entry.circuit.generate_svg(file_=basename)
+        svg_path = basename + ".svg"
+        if not os.path.exists(svg_path):
+            return {
+                "status": "error",
+                "message": "SVG generation produced no output file. This feature "
+                           "requires the 'netlistsvg' tool (and graphviz) to be installed.",
+            }
+        with open(svg_path, "r") as f:
+            svg_content = f.read()
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"SVG generation failed: {e or type(e).__name__}. This feature "
+                       "requires the 'netlistsvg' tool and graphviz to be installed.",
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return {
+        "status": "ok",
+        "format": "svg",
+        "content": svg_content,
+        "message": f"SVG schematic generated for circuit '{entry.name}'.",
+    }
 
 
 def generate_bom(output_format: str = "json") -> dict:
@@ -183,29 +198,45 @@ def generate_kicad_schematic() -> dict:
     """
     try:
         entry = manager.get_active()
-
-        if not entry.parts:
-            return {"status": "error", "message": "Circuit has no parts. Add parts before generating a schematic."}
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".kicad_sch", delete=False) as f:
-            tmp_path = f.name
-
-        try:
-            entry.circuit.generate_schematic(file_=tmp_path)
-            with open(tmp_path, "r") as f:
-                content = f.read()
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-        return {
-            "status": "ok",
-            "format": "kicad_sch",
-            "content": content,
-            "message": f"KiCad schematic generated for circuit '{entry.name}'.",
-        }
-    except (RuntimeError, FileNotFoundError, OSError) as e:
+    except RuntimeError as e:
         return {"status": "error", "message": str(e)}
+
+    if not entry.parts:
+        return {"status": "error", "message": "Circuit has no parts. Add parts before generating a schematic."}
+
+    # SKiDL's generate_schematic writes into a *directory* (filepath) using
+    # top_name as the base filename — it does not accept a single output file.
+    tmp_dir = tempfile.mkdtemp(prefix="skidl_sch_")
+    top_name = "schematic"
+    try:
+        entry.circuit.generate_schematic(filepath=tmp_dir, top_name=top_name)
+        sch_path = os.path.join(tmp_dir, f"{top_name}.kicad_sch")
+        if not os.path.exists(sch_path):
+            produced = [f for f in os.listdir(tmp_dir) if f.endswith(".kicad_sch")]
+            if not produced:
+                return {
+                    "status": "error",
+                    "message": "Schematic generation produced no .kicad_sch file.",
+                }
+            sch_path = os.path.join(tmp_dir, produced[0])
+        with open(sch_path, "r") as f:
+            content = f.read()
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Schematic generation failed: {e or type(e).__name__}. SKiDL's "
+                       "schematic generator is experimental and requires parts from real "
+                       "KiCad symbol libraries (added via add_part), not bare parts.",
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return {
+        "status": "ok",
+        "format": "kicad_sch",
+        "content": content,
+        "message": f"KiCad schematic generated for circuit '{entry.name}'.",
+    }
 
 
 def export_python() -> dict:
