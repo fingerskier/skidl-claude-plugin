@@ -25,3 +25,4 @@ skidl_sklib.py
 *.erc
 *.log
 bash.exe.stackdump
+err.txt
