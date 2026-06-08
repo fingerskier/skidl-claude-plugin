@@ -41,11 +41,12 @@ def run_erc() -> dict:
             line = line.strip()
             if not line:
                 continue
-            if "WARNING" in line.upper() or "warning" in line.lower():
+            lower = line.lower()
+            if "warning" in lower:
                 warnings.append(line)
-            elif "ERROR" in line.upper() or "error" in line.lower():
+            elif "error" in lower:
                 errors.append(line)
-            elif line:
+            else:
                 warnings.append(line)
 
         passed = len(errors) == 0

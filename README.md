@@ -17,17 +17,27 @@ MCP server for designing electronic schematics and PCB layouts using [SKiDL](htt
 ## Prerequisites
 
 - Python 3.10+
-- [KiCad](https://www.kicad.org/) installed (for component libraries)
+- [KiCad](https://www.kicad.org/) installed — only required for adding parts and searching component libraries. Circuit building, validation, and export work without it.
 
 ## Installation
+
+This repository is both a **Claude Code plugin** and a standalone **MCP server**.
+
+### As a Claude Code plugin
+
+The plugin ships its MCP server definition in [`.mcp.json`](./.mcp.json), which runs the server via [`uvx`](https://docs.astral.sh/uv/) straight from this repo — no manual install step is needed. Just make sure [`uv`](https://docs.astral.sh/uv/getting-started/installation/) is installed so `uvx` is on your PATH.
+
+### Manual install (standalone / Claude Desktop)
 
 ```bash
 pip install -e .
 ```
 
+This exposes the `skidl-mcp` console script.
+
 ## Usage
 
-### As an MCP server (stdio)
+### Run the MCP server directly (stdio)
 
 ```bash
 skidl-mcp
@@ -35,7 +45,15 @@ skidl-mcp
 
 ### With Claude Code
 
-Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json`):
+Register the server with the CLI:
+
+```bash
+claude mcp add skidl -- uvx --from git+https://github.com/fingerskier/skidl-claude-plugin skidl-mcp
+```
+
+### With Claude Desktop
+
+Add to `~/.claude/claude_desktop_config.json` (requires the manual `pip install` above):
 
 ```json
 {

@@ -58,8 +58,6 @@ def list_kicad_libraries() -> str:
 def get_library_parts(lib_name: str) -> str:
     """Get the parts available in a specific KiCad library."""
     try:
-        from skidl import lib_search_paths, KICAD
-
         lib_paths = _find_kicad_lib_paths()
 
         # Find the library file
@@ -99,7 +97,12 @@ def _find_kicad_lib_paths() -> list[str]:
     if kicad_sym:
         paths.append(kicad_sym)
 
-    kicad_root = os.environ.get("KICAD8_SYMBOL_DIR", "") or os.environ.get("KICAD7_SYMBOL_DIR", "") or os.environ.get("KICAD6_SYMBOL_DIR", "")
+    kicad_root = (
+        os.environ.get("KICAD9_SYMBOL_DIR", "")
+        or os.environ.get("KICAD8_SYMBOL_DIR", "")
+        or os.environ.get("KICAD7_SYMBOL_DIR", "")
+        or os.environ.get("KICAD6_SYMBOL_DIR", "")
+    )
     if kicad_root:
         paths.append(kicad_root)
 
@@ -113,6 +116,7 @@ def _find_kicad_lib_paths() -> list[str]:
         "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols",
         # Windows (common)
         "C:/Program Files/KiCad/share/kicad/symbols",
+        "C:/Program Files/KiCad/9.0/share/kicad/symbols",
         "C:/Program Files/KiCad/8.0/share/kicad/symbols",
     ]
 
