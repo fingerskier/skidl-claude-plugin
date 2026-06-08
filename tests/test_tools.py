@@ -439,3 +439,44 @@ class TestSummaryLibraryField:
         result = entry.summary()
         lib_value = result["parts"][0]["library"]
         assert lib_value is None
+
+
+class TestExternalToolGracefulFailure:
+    """External/experimental SKiDL features must return error dicts, never raise.
+
+    These guard against regressions where a missing library or the experimental
+    schematic/SVG generators would crash the MCP tool call instead of returning
+    a clean {"status": "error"} result.
+    """
+
+    def test_add_part_bad_library_returns_error(self):
+        circuit.create_circuit("c1")
+        result = parts.add_part("NoSuchLib", "NoSuchPart")
+        assert result["status"] == "error"
+        assert "NoSuchLib" in result["message"]
+
+    def test_search_parts_returns_structured_list(self):
+        # With no KiCad libraries configured the result is empty but must still
+        # be a well-formed list (of dicts when matches exist), not raw strings.
+        result = parts.search_parts("resistor")
+        assert result["status"] == "ok"
+        assert isinstance(result["results"], list)
+        assert result["count"] == len(result["results"])
+
+    def test_generate_kicad_schematic_never_raises(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R")
+        # Bare SKIDL parts cannot be routed into a schematic; must fail cleanly.
+        result = generate.generate_kicad_schematic()
+        assert result["status"] in ("ok", "error")
+        assert "message" in result
+
+    def test_generate_svg_never_raises(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        _make_part(entry, name="R")
+        # netlistsvg is typically unavailable in CI; must fail cleanly.
+        result = generate.generate_svg()
+        assert result["status"] in ("ok", "error")
+        assert "message" in result

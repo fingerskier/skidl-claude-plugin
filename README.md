@@ -17,7 +17,8 @@ MCP server for designing electronic schematics and PCB layouts using [SKiDL](htt
 ## Prerequisites
 
 - Python 3.10+
-- [KiCad](https://www.kicad.org/) installed — only required for adding parts and searching component libraries. Circuit building, validation, and export work without it.
+- [KiCad](https://www.kicad.org/) installed — only required for adding parts and searching component libraries. Circuit building, validation, and netlist/BOM/Python export work without it.
+- *Optional:* [`netlistsvg`](https://github.com/nturley/netlistsvg) for `generate_svg`. SKiDL's `generate_kicad_schematic` is experimental and needs parts from real KiCad symbol libraries.
 
 ## Installation
 
