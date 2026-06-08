@@ -20,6 +20,7 @@ output/
 *.kicad_pcb
 skidl_REPL.*
 .claude/
-__main__.erc
-__main__.log
+# SKiDL run artifacts (named after the running module/script)
+*.erc
+*.log
 bash.exe.stackdump
