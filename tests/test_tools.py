@@ -480,3 +480,68 @@ class TestExternalToolGracefulFailure:
         result = generate.generate_svg()
         assert result["status"] in ("ok", "error")
         assert "message" in result
+
+
+class TestSearchPartsSkipsUnopenableLibraries:
+    """search_parts() must tolerate libraries that cannot be opened.
+
+    A stale part-search cache (or a deleted/corrupt .kicad_sym file) makes
+    SKiDL raise "Can't open file: ..." mid-search. That single bad library
+    must NOT turn the whole tool call into an error — the un-openable library
+    is skipped and a well-formed result is returned.
+    """
+
+    def _patch_search(self, monkeypatch, side_effects):
+        """Replace the underlying SKiDL search with a scripted fake.
+
+        side_effects is a list applied per call: an Exception instance is
+        raised; a string is written to the output buffer as one result line.
+        """
+        calls = {"n": 0}
+
+        def fake_search(query, fmt=None, file=None):
+            i = calls["n"]
+            calls["n"] += 1
+            effect = side_effects[min(i, len(side_effects) - 1)]
+            if isinstance(effect, Exception):
+                raise effect
+            if effect and file is not None:
+                file.write(effect + "\n")
+
+        monkeypatch.setattr(parts, "_skidl_search_parts", fake_search)
+        return calls
+
+    def test_skips_unopenable_lib_and_returns_good_results(self, monkeypatch):
+        # First pass hits an un-openable library; after skipping it the retry
+        # succeeds and yields a real part. That part must be returned.
+        self._patch_search(
+            monkeypatch,
+            [
+                FileNotFoundError("Can't open file: /libs/Bogus.kicad_sym"),
+                "Device\tR\tResistor",
+            ],
+        )
+        result = parts.search_parts("resistor")
+        assert result["status"] == "ok"
+        assert result["count"] == 1
+        assert result["results"][0]["name"] == "R"
+        assert result["results"][0]["library"] == "Device"
+
+    def test_all_libs_unopenable_returns_empty_ok(self, monkeypatch):
+        # Every attempt fails to open the same library: no recovery possible,
+        # but the result must still be a well-formed empty OK list, not error.
+        self._patch_search(
+            monkeypatch,
+            [FileNotFoundError("Can't open file: /libs/Bogus.kicad_sym")],
+        )
+        result = parts.search_parts("resistor")
+        assert result["status"] == "ok"
+        assert result["results"] == []
+        assert result["count"] == 0
+
+    def test_genuine_error_still_reported(self, monkeypatch):
+        # A non-library error must NOT be masked as an empty success.
+        self._patch_search(monkeypatch, [ValueError("totally unrelated boom")])
+        result = parts.search_parts("resistor")
+        assert result["status"] == "error"
+        assert "boom" in result["message"]

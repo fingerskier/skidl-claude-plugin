@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import sys
 
 from skidl import KICAD, Part
@@ -100,16 +101,40 @@ def search_parts(query: str, library: str = "") -> dict:
     # scraping free-form console text. The field names match SKiDL's search API.
     fmt = "{lib_name}\t{part_name}\t{description}"
 
-    try:
+    # A single un-openable library (stale search cache, deleted or corrupt
+    # .kicad_sym file) makes SKiDL raise mid-search and abort the whole call.
+    # We skip such libraries: prune the offender from SKiDL's cache, then retry
+    # so the remaining good libraries still produce results. Re-seeing the same
+    # bad library means the prune did not help, so we stop and degrade to a
+    # well-formed empty result rather than erroring the tool call.
+    skipped: list[str] = []
+    seen_bad: set[str] = set()
+    # Bound the loop so a pathological cache can never spin forever; the
+    # repeat-guard below normally terminates it much sooner.
+    for _ in range(64):
         buf = io.StringIO()
         try:
-            _skidl_search_parts(query, fmt=fmt, file=buf)
-        except TypeError:
-            # Older/newer SKiDL without fmt/file kwargs: fall back to stdout.
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                _skidl_search_parts(query)
+            try:
+                _skidl_search_parts(query, fmt=fmt, file=buf)
+            except TypeError:
+                # Older/newer SKiDL without fmt/file kwargs: fall back to stdout.
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    _skidl_search_parts(query)
+        except Exception as e:
+            bad = _unopenable_lib_path(e)
+            if bad is None:
+                # Not a library-open failure — a genuine error worth surfacing.
+                return {"status": "error", "message": f"Search failed: {e}"}
+            if bad in seen_bad:
+                # Pruning did not clear it; stop and return what we can.
+                break
+            seen_bad.add(bad)
+            skipped.append(bad)
+            _prune_lib_from_cache(bad)
+            continue
 
+        # Search completed without raising — parse the buffered results.
         results = []
         for line in buf.getvalue().splitlines():
             line = line.rstrip()
@@ -133,16 +158,63 @@ def search_parts(query: str, library: str = "") -> dict:
                     continue
                 results.append({"library": "", "name": line, "description": ""})
 
-        return {
-            "status": "ok",
-            "query": query,
-            "library_filter": library or "all",
-            "results": results,
-            "count": len(results),
-        }
-    except Exception as e:
-        # Loading/parsing KiCad libraries can fail in many ways; surface cleanly.
-        return {"status": "error", "message": f"Search failed: {e}"}
+        return _search_result(query, library, results, skipped)
+
+    # Exhausted retries with an unrecoverable un-openable library: degrade to a
+    # well-formed empty result so the caller never sees a hard error.
+    return _search_result(query, library, [], skipped)
+
+
+def _search_result(query: str, library: str, results: list, skipped: list) -> dict:
+    """Build the standard search_parts response, noting any skipped libraries."""
+    out = {
+        "status": "ok",
+        "query": query,
+        "library_filter": library or "all",
+        "results": results,
+        "count": len(results),
+    }
+    if skipped:
+        out["skipped_libraries"] = sorted(set(skipped))
+    return out
+
+
+def _unopenable_lib_path(exc: Exception) -> str | None:
+    """Return the offending library path if exc is a library-open failure.
+
+    SKiDL signals an unreadable library either as a FileNotFoundError or via a
+    "Can't open file: <path>" message. Anything else is a genuine error and
+    returns None so the caller can surface it.
+    """
+    if isinstance(exc, FileNotFoundError) and getattr(exc, "filename", None):
+        return str(exc.filename)
+    msg = str(exc)
+    match = re.search(r"[Cc]an'?t open file:\s*(.+)", msg)
+    if match:
+        return match.group(1).strip().rstrip(".")
+    if isinstance(exc, FileNotFoundError):
+        return msg.strip() or "<unknown>"
+    return None
+
+
+def _prune_lib_from_cache(lib_path: str) -> None:
+    """Best-effort removal of a library from SKiDL's part-search cache.
+
+    Stale cache entries point at libraries that no longer exist; dropping the
+    offender lets a retry of the search succeed using the remaining libraries.
+    All access to SKiDL internals is guarded so a layout change there can never
+    crash the search tool.
+    """
+    try:
+        import skidl
+        from skidl.part_query import part_search_dbs
+
+        tool = skidl.get_default_tool()
+        db = part_search_dbs.get(tool)
+        if db is not None:
+            db.rmv_lib(lib_path)
+    except Exception:
+        pass
 
 
 def list_parts(circuit_name: str = "") -> dict:
