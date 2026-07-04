@@ -7,6 +7,7 @@ import io
 import re
 import sys
 
+import skidl_mcp.skidl_quiet  # noqa: F401  (must precede any skidl import)
 from skidl import KICAD, Part
 from skidl import search_parts as _skidl_search_parts
 

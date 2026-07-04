@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import skidl_mcp.skidl_quiet  # noqa: F401  (must precede any skidl import)
 from skidl import Bus, Net
 
 from skidl_mcp.circuit_manager import manager

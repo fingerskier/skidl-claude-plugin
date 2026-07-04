@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import skidl_mcp.skidl_quiet  # noqa: F401  (must precede any skidl import)
 from skidl import Bus, Circuit, Net, Part
 
 

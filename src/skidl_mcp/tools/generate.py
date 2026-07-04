@@ -49,7 +49,9 @@ def generate_netlist() -> dict:
             tmp_path = f.name
 
         try:
-            entry.circuit.generate_netlist(file_=tmp_path)
+            # do_backup=False: the default writes a <script>_lib_sklib.py
+            # backup library into the server's CWD — the user's project.
+            entry.circuit.generate_netlist(file_=tmp_path, do_backup=False)
             with open(tmp_path, "r") as f:
                 netlist_content = f.read()
         finally:
