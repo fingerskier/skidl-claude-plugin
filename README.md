@@ -133,9 +133,13 @@ Use these prompts to guide circuit design:
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest
+pip install -e ".[dev]"     # see HOWTO.md §2 if the build trips on kinet2pcb/hierplace
+pytest                      # 74 tests; no PYTHONPATH needed
 ```
+
+[HOWTO.md](./HOWTO.md) covers local setup (including the SKiDL transitive-dependency
+build gotcha), the test layout, a manual end-to-end smoke test, and which features
+need a real KiCad install to verify. [PLAN.md](./PLAN.md) holds the upgrade roadmap.
 
 ## License
 
