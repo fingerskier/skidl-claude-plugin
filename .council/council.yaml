@@ -1,0 +1,11 @@
+# Software design + review council. The default template for `convene`.
+# Copied into .council/council.yaml by `/council convene software-team`.
+name: software-team
+description: Software design + review council
+chair: staff-engineer
+seats: [staff-engineer, electrical-engineer, security-engineer, qa-engineer, product-manager]
+work_budget:
+  max_turns: 12          # hard cap on take-turns rounds in `work`
+  scratch_max_bytes: 200000  # hard stop trigger: halt `work` if the scratchpad grows past this
+memory_budget:
+  manifest_max_bytes: 8000   # cap on the memory manifest injected into each spawn; unset/0 = uncapped
