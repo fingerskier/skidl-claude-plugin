@@ -3,160 +3,42 @@
 This is the forward-looking plan for `skidl-claude-plugin`. Dev/test how-to
 lives in [HOWTO.md](./HOWTO.md); user-facing docs live in [README.md](./README.md).
 
-The plan came out of a full repo review. Every **P0** correctness claim below
-was reproduced on a real machine (Windows 11, Python 3.14, skidl 2.2.1,
-KiCad 9.0 + 10.0 installed at `C:/Program Files/KiCad/`). The reproduction
-evidence is inline so a future maintainer can re-check before touching code.
-
-**Bottom line:** the plugin's flagship path — *add real KiCad parts → wire →
-ERC → export a netlist* — is silently broken today. Parts added from KiCad
-libraries never join the circuit, so netlists export empty; ERC always reports
-"passed"; and part metadata floods Claude's context with 30 KB of library-catalog
-text per part. None of this is caught by the current 74 green tests, because
-every test injects bare `SKIDL`-tool parts directly and bypasses `add_part`.
-Fix P0 first — no feature work matters until the core loop actually works and is
-guarded by a test that uses real symbols.
+This roadmap starts after the P0 reliability release. The core loop now works on
+this machine with real KiCad symbols: add real parts, wire them, run ERC, and
+export a KiCad netlist. The next work should focus on making that fixed core more
+persistent, file-oriented, documented, and comfortable for repeated real use.
 
 Priority legend — effort: **S** ≤2h · **M** ½–1 day · **L** multi-day.
 Impact is relative to "usable as a real EE's daily tool."
 
 ---
 
-## P0 — Reliability release (correctness; do this first)
+## Shipped — P0 reliability release (2026-07-05)
 
-Status 2026-07-05: implemented and covered by unit tests plus the
-`integration_kicad` real-symbol test tier when KiCad symbols are available.
+The P0 release fixed the real-KiCad core loop and added regression coverage:
 
-These four bugs each break the plugin's core promise on a real machine. Ship
-them together with a real-KiCad integration test tier so they can't regress.
+- `add_part` now adds real KiCad symbols to the active circuit with assigned refs.
+- `run_erc` captures SKiDL `erc_logger` records and reports warnings/errors.
+- circuit summaries, BOMs, and Python export use compact library names instead
+  of dumping full library catalogs into tool output.
+- KiCad 10 and standard symbol paths are discovered at startup and appended to
+  `skidl.lib_search_paths[KICAD]`; `kicad_diagnostics` reports path/cache state.
+- `connect` and `connect_pins` connect every matching duplicate pin name.
+- `tests/test_integration_kicad.py` covers real-symbol add/export/ERC/multi-pin
+  behavior when KiCad symbols are available.
 
-### P0.1 — `add_part` never adds the part (CRITICAL) · S · impact: high
-
-`src/skidl_mcp/tools/parts.py:38` builds `kwargs = {"dest": KICAD}` and passes it
-to `Part()`. But `dest` must be one of skidl's `NETLIST`/`LIBRARY`/`TEMPLATE`
-sentinels (skidl `part.py`); `KICAD` is the *tool* constant `'kicad9'`
-(skidl `skidl.py:50`). With an unrecognized `dest`, skidl's `Part` code path that
-runs `circuit += self` never executes, so the part:
-
-- is **never added** to `entry.circuit` (netlist exports zero components),
-- keeps `part.ref == None` (every `add_part` stores under `entry.parts[None]`,
-  overwriting the previous part),
-- makes every subsequent `connect`/`connect_pins` a silent no-op (the pin's part
-  has no circuit).
-
-**Reproduced (this machine, `KICAD9_SYMBOL_DIR` set):**
-```
-Part('Device','R', circuit=c, dest=KICAD) -> len(c.parts)==0, ref==None
-Part('Device','R', circuit=c)             -> len(c.parts)==1, ref=='R1'
-```
-
-**Fix:** the intended kwarg was `tool=KICAD` — or drop it entirely, since
-`kicad9` is already the default tool. Change `parts.py:38` accordingly.
-
-### P0.2 — `run_erc` always reports green (CRITICAL) · S · impact: high
-
-`src/skidl_mcp/tools/validate.py` wraps `circuit.ERC()` in
-`contextlib.redirect_stdout/redirect_stderr`. But skidl emits ERC results through
-its `erc_logger` **logging** logger, whose `StreamHandler` captured the *original*
-`sys.stderr` at import time. `redirect_stderr` swaps `sys.stderr` but not the
-handler's stored stream, so the captured buffer is always empty → `errors == []`,
-`warnings == []`, `passed == True`, **always**. For a validation tool this is the
-worst possible failure: the EE asks "is my circuit clean?" and gets a confident,
-wrong *yes*.
-
-**Reproduced (this machine):** a circuit with a floating pin and a single-pin net.
-skidl's own ERC prints 3 warnings ("Only one pin attached to net VIN", "No drivers
-for net VIN", "Unconnected pin 2/p2"). The plugin's `run_erc` returned
-`status=ok, passed=True, error_count=0, warning_count=0, raw_output=''`.
-
-**Fix:** attach a temporary `logging.Handler` (list-collecting) to
-`skidl.logger.erc_logger` around `circuit.ERC()`, then classify records by level
-(`ERROR`/`WARNING`) — cleaner and more reliable than the current stdout
-substring parsing. Remove the `redirect_*` approach.
-
-### P0.3 — `str(part.lib)` dumps the whole library catalog (30 KB/part) · S · impact: high
-
-For real KiCad parts, `part.lib` is a `SchLib` whose `str()` is the full catalog of
-every part in that library. `src/skidl_mcp/circuit_manager.py:38` puts
-`str(lib)` into each part's `"library"` field in `summary()`, so
-`get_circuit_info` and the `circuit://` resources return ~30 KB of junk **per
-part** into Claude's context (≈600 KB for a 20-part design). `generate.py:279`
-does the same in `export_python` — emitting `Part('<30KB string>', 'R', ...)`,
-which is unrunnable, so the "export" cannot recreate the circuit. Same pattern in
-`generate_bom`'s group key at `generate.py:141`.
-
-**Reproduced (this machine):** `len(str(Part('Device','R').lib)) == 30208`;
-`Part('Device','R').lib.filename == 'Device'`.
-
-**Fix:** use `part.lib.filename` (== `'Device'`) at `circuit_manager.py:38`,
-`generate.py:141`, and `generate.py:279`. Note the existing guard test
-`test_summary_library_is_none_not_string` only covers bare `SKIDL` parts (lib is
-`None`), so it never exercised this path.
-
-### P0.4 — KiCad libraries aren't wired into skidl (fails out-of-the-box; misses KiCad 10) · M · impact: high
-
-skidl finds KiCad symbol libraries only via `KICAD*_SYMBOL_DIR` env vars, which
-the KiCad installer does not set. `resources.py:91-136` has a working
-`_find_kicad_lib_paths()` discovery function — but it only renders the
-`libraries://` resource; the server never feeds discovered paths into
-`skidl.lib_search_paths`. So on a stock Windows install `add_part`/`search_parts`
-raise `FileNotFoundError: Can't open file: Device` while `libraries://list`
-*works* (it uses the hardcoded probe) — a baffling split. Discovery also checks
-`KICAD9/8/7/6_SYMBOL_DIR` and hardcodes `.../9.0/...` and `.../8.0/...` but not
-`KICAD10_SYMBOL_DIR` or `.../10.0/...`, even though KiCad 10 is installed here.
-
-**Fix:** at server startup, run discovery (extended with KiCad 10 paths) and
-append the results to `skidl.lib_search_paths[KICAD]`. Only `KICAD9_SYMBOL_DIR`
-is operative for `add_part`/`search_parts` (skidl's default tool is `kicad9` and
-each backend reads only its own var), so a KiCad 8/10 user should still have
-`KICAD9_SYMBOL_DIR` pointed at their symbols dir — `.kicad_sym` is read-compatible
-across versions. Also add a `diagnostics` tool that reports the configured search
-paths, library count, and cache freshness, so "why does search find nothing" is
-answerable in one call. (Caveat: a `.skidlcfg` file in CWD/`~/.skidl`/`/etc` with
-`lib_search_paths` silently overrides env vars — worth surfacing in diagnostics.)
-
-### P0.5 — `connect`/`connect_pins` wire only the first matching pin · M · impact: high
-
-`src/skidl_mcp/tools/nets.py:55-59` and `nets.py:242-248` loop over `part.pins`
-and `break` on the first pin whose `num` or `name` matches. Real MCUs/FPGAs have
-several `VCC`/`GND` pins (e.g. ATmega328P-AU: VCC on 4 & 6, AVCC on 18, GND on
-3/5/21). `connect GND U1 GND` attaches **one** GND pin, leaves the rest floating,
-and reports success. Combined with the ERC false-green (P0.2), the EE gets no
-signal that power wiring is incomplete. skidl's native `part['GND']` returns *all*
-matching pins for exactly this reason.
-
-**Fix:** collect *all* matching pins and connect them all (reporting the list);
-warn when a name matches multiple pins. Optionally add explicit
-`connect_all_pins` semantics.
-
-### P0.6 — Real-KiCad integration test tier (the thing that would have caught all of the above) · M · impact: high
-
-Every current parts/nets/generate/validate test injects a bare `SKIDL`-tool part
-straight into `entry.parts`, bypassing `add_part`'s `Part(dest=KICAD)` call. The
-only `add_part` test asserts the *error* path (bad library). No test asserts that
-a part added via `add_part` lands in `entry.circuit.parts` with a real ref, that a
-generated netlist contains `(comp` entries matching `parts_count`, or that
-`run_erc` fails a known-bad circuit.
-
-**Fix:** add `tests/test_integration_kicad.py` behind a pytest marker that skips
-when no symbol dir is discovered (enabled locally and in a CI job that fetches the
-KiCad symbols repo — plain files, no KiCad install needed). Assert:
-(a) `add_part` yields a real ref and grows `entry.circuit.parts`;
-(b) netlist `(comp` count == `parts_count`;
-(c) `run_erc` flags a deliberately floating pin;
-(d) a multi-VCC part connects all its power pins (P0.5).
-Follow red/green TDD: these tests should fail on today's code and pass after
-P0.1–P0.5.
+Verification at ship: `python -m pytest -q --basetemp .pytest-tmp -p no:cacheprovider`
+passed with 86 tests.
 
 ---
 
-## P1 — The "+1" leap (highest-value features, after P0)
+## P1 — The "+1" leap (highest-value features)
 
 ### P1.1 — Design-as-code persistence: save / load / import · M · impact: high
 
 Today `CircuitManager` is a pure in-memory dict; the MCP server restarts every
 Claude Code session, so **every design evaporates**, and `export_python` is a
-one-way (currently broken, see P0.3) street with no `load` counterpart. This is
+one-way export path with no `load` counterpart. This is
 the single biggest demo-vs-daily-driver gap: a companion that forgets the design
 between sessions can't carry a multi-day project. skidl's entire value
 proposition is *circuits as git-diffable code* — lean into it.
@@ -296,12 +178,12 @@ lifecycle, disk-cached, degrades gracefully with no keys.
 
 ### P2.6 — Part-search UX: bounded, ranked, cache-warm · S · impact: medium
 
-`search_parts` either misses (no libs configured — see P0.4) or floods (unbounded,
-unranked). skidl's first search builds its cache slowly (minutes over 200+
+`search_parts` can still flood (unbounded, unranked), and skidl's first search
+builds its cache slowly (minutes over 200+
 libraries) with no feedback, so it feels broken over MCP. Add `max_results`
 (default ~40) + `truncated` flag + `offset` paging; rank exact-name → keyword →
-description; include `pin_count`/`datasheet` per row. Pair with the P0.4
-`diagnostics`/cache-warm tool.
+description; include `pin_count`/`datasheet` per row. Pair with
+`kicad_diagnostics` and an explicit cache-warm tool.
 
 ---
 
@@ -363,7 +245,7 @@ Calver releases with user-visible changes and no changelog read as a demo. Add:
   un-openable-library skip (`ebf9b19`), and the working-dir artifact fix (`48f65bb`).
 - **`.github/workflows/test.yml`** implementing HOWTO's recipe (skidl `--no-deps` +
   graphviz + simp_sexp, plain `pytest`) across Python 3.10–3.14 on ubuntu+windows,
-  plus the P0.6 real-KiCad job; add a status badge.
+  plus the `integration_kicad` real-symbol job; add a status badge.
 - **CONTRIBUTING.md** pointing at HOWTO for the dev env and stating the red/green
   TDD expectation the repo already follows.
 
@@ -415,11 +297,10 @@ example values), plus a pytest asserting the file is current.
 
 ## Suggested sequencing
 
-1. **P0.1–P0.6** as one "reliability" PR (red/green: integration test first).
-2. **P3.1 + P3.2** (10-minute correctness/credibility fixes) alongside P0.
-3. **P1.1 (persistence)** → unlocks **P1.2 (kicad-buddy)** and **P2.1 (hierarchy)**.
-4. **P1.3 (calculators)** and **P1.4 (docstrings)** in parallel — both are
+1. **P3.1 + P3.2** (10-minute correctness/credibility fixes).
+2. **P1.1 (persistence)** → unlocks **P1.2 (kicad-buddy)** and **P2.1 (hierarchy)**.
+3. **P1.3 (calculators)** and **P1.4 (docstrings)** in parallel — both are
    self-contained and high-leverage.
-5. **P3.3–P3.6** docs/hygiene as the feature set stabilizes.
-6. **P2.3 (SPICE)** and **P2.5 stage 2 (sourcing)** last — highest effort, most
+4. **P3.3–P3.6** docs/hygiene as the feature set stabilizes.
+5. **P2.3 (SPICE)** and **P2.5 stage 2 (sourcing)** last — highest effort, most
    optional.
