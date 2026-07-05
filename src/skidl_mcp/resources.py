@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 
+import skidl_mcp.skidl_quiet  # noqa: F401  (must precede any skidl import)
 from skidl_mcp.circuit_manager import manager
 
 
@@ -92,19 +93,20 @@ def _find_kicad_lib_paths() -> list[str]:
     """Find KiCad library paths from environment and standard locations."""
     paths = []
 
-    # Environment variable
-    kicad_sym = os.environ.get("KICAD_SYMBOL_DIR", "")
-    if kicad_sym:
-        paths.append(kicad_sym)
+    def add_path(path: str) -> None:
+        if path and path not in paths:
+            paths.append(path)
 
-    kicad_root = (
-        os.environ.get("KICAD9_SYMBOL_DIR", "")
-        or os.environ.get("KICAD8_SYMBOL_DIR", "")
-        or os.environ.get("KICAD7_SYMBOL_DIR", "")
-        or os.environ.get("KICAD6_SYMBOL_DIR", "")
-    )
-    if kicad_root:
-        paths.append(kicad_root)
+    # Environment variable
+    for env_var in (
+        "KICAD_SYMBOL_DIR",
+        "KICAD10_SYMBOL_DIR",
+        "KICAD9_SYMBOL_DIR",
+        "KICAD8_SYMBOL_DIR",
+        "KICAD7_SYMBOL_DIR",
+        "KICAD6_SYMBOL_DIR",
+    ):
+        add_path(os.environ.get(env_var, ""))
 
     # Standard locations
     standard_paths = [
@@ -116,24 +118,119 @@ def _find_kicad_lib_paths() -> list[str]:
         "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols",
         # Windows (common)
         "C:/Program Files/KiCad/share/kicad/symbols",
+        "C:/Program Files/KiCad/10.0/share/kicad/symbols",
         "C:/Program Files/KiCad/9.0/share/kicad/symbols",
         "C:/Program Files/KiCad/8.0/share/kicad/symbols",
+        "C:/Program Files/KiCad/7.0/share/kicad/symbols",
+        "C:/Program Files/KiCad/6.0/share/kicad/symbols",
     ]
 
     for p in standard_paths:
-        if os.path.isdir(p) and p not in paths:
-            paths.append(p)
+        if os.path.isdir(p):
+            add_path(p)
 
     # SKiDL's own search paths
     try:
         from skidl import lib_search_paths, KICAD
         for p in lib_search_paths.get(KICAD, []):
-            if p not in paths:
-                paths.append(str(p))
+            add_path(str(p))
     except (ImportError, AttributeError):
         pass
 
     return paths
+
+
+def configure_kicad_library_paths() -> dict:
+    """Append discovered KiCad symbol directories to SKiDL's KICAD search path."""
+    from skidl import KICAD, lib_search_paths
+
+    configured = lib_search_paths.setdefault(KICAD, [])
+    configured_text = [str(p) for p in configured]
+    added = []
+
+    for path in _find_kicad_lib_paths():
+        if not os.path.isdir(path) or path in configured_text:
+            continue
+        configured.append(path)
+        configured_text.append(path)
+        added.append(path)
+
+    return {
+        "status": "ok",
+        "tool": KICAD,
+        "added_paths": added,
+        "configured_paths": [str(p) for p in configured],
+        "library_count": _count_libraries(configured),
+    }
+
+
+def kicad_diagnostics() -> dict:
+    """Report KiCad symbol discovery, configured SKiDL paths, and cache state."""
+    config = configure_kicad_library_paths()
+    discovered = _find_kicad_lib_paths()
+    return {
+        "status": "ok",
+        "tool": config["tool"],
+        "discovered_paths": discovered,
+        "configured_paths": config["configured_paths"],
+        "added_paths": config["added_paths"],
+        "library_count": _count_libraries(config["configured_paths"]),
+        "environment": {
+            name: os.environ.get(name, "")
+            for name in (
+                "KICAD_SYMBOL_DIR",
+                "KICAD10_SYMBOL_DIR",
+                "KICAD9_SYMBOL_DIR",
+                "KICAD8_SYMBOL_DIR",
+                "KICAD7_SYMBOL_DIR",
+                "KICAD6_SYMBOL_DIR",
+            )
+        },
+        "config_files": _existing_skidl_config_files(),
+        "cache": _part_search_cache_info(),
+    }
+
+
+def _count_libraries(paths) -> int:
+    """Count KiCad symbol libraries in the supplied directories."""
+    libraries = set()
+    for raw_path in paths:
+        path = Path(str(raw_path))
+        if not path.is_dir():
+            continue
+        for entry in path.iterdir():
+            if entry.suffix in (".kicad_sym", ".lib"):
+                libraries.add(str(entry.resolve()))
+    return len(libraries)
+
+
+def _existing_skidl_config_files() -> list[str]:
+    """Return likely SKiDL config files that could affect library paths."""
+    candidates = [
+        Path.cwd() / ".skidlcfg",
+        Path.home() / ".skidlcfg",
+        Path.home() / ".skidl" / "config",
+        Path("/etc/skidl/.skidlcfg"),
+    ]
+    return [str(path) for path in candidates if path.is_file()]
+
+
+def _part_search_cache_info() -> dict:
+    """Return best-effort details about SKiDL's part-search cache."""
+    try:
+        from skidl import KICAD
+        from skidl.part_query import part_search_dbs
+
+        db = part_search_dbs.get(KICAD)
+        return {
+            "loaded": db is not None,
+            "type": type(db).__name__ if db is not None else None,
+        }
+    except Exception as e:
+        return {
+            "loaded": False,
+            "error": str(e),
+        }
 
 
 def _parse_library_parts(lib_file: str) -> list[str]:

@@ -10,12 +10,16 @@ from fastmcp import FastMCP
 
 from skidl_mcp.tools import circuit, parts, nets, generate, validate
 from skidl_mcp.resources import (
+    configure_kicad_library_paths,
     get_active_circuit,
     get_circuit_by_name,
+    kicad_diagnostics as _kicad_diagnostics,
     list_kicad_libraries,
     get_library_parts,
 )
 from skidl_mcp.prompts import PROMPTS, get_prompt, list_prompts
+
+configure_kicad_library_paths()
 
 mcp = FastMCP(
     "skidl-circuit-designer",
@@ -279,6 +283,12 @@ def check_connections() -> dict:
 def validate_footprints() -> dict:
     """Check that all parts have valid footprints for PCB layout."""
     return validate.validate_footprints()
+
+
+@mcp.tool()
+def kicad_diagnostics() -> dict:
+    """Report KiCad symbol paths, SKiDL search paths, library count, and cache state."""
+    return _kicad_diagnostics()
 
 
 # ── Resources ───────────────────────────────────────────────────────────────

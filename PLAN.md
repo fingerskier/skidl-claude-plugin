@@ -24,6 +24,9 @@ Impact is relative to "usable as a real EE's daily tool."
 
 ## P0 — Reliability release (correctness; do this first)
 
+Status 2026-07-05: implemented and covered by unit tests plus the
+`integration_kicad` real-symbol test tier when KiCad symbols are available.
+
 These four bugs each break the plugin's core promise on a real machine. Ship
 them together with a real-KiCad integration test tier so they can't regress.
 

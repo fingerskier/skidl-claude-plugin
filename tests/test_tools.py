@@ -1,8 +1,12 @@
 """Tests for MCP tool functions."""
 
-import pytest
-from skidl import SKIDL, Net, Part, Pin
+import json
+from types import SimpleNamespace
 
+import pytest
+from skidl import KICAD, SKIDL, Net, Part, Pin, lib_search_paths
+
+from skidl_mcp import resources
 from skidl_mcp.circuit_manager import manager
 from skidl_mcp.tools import circuit, nets, parts, generate, validate
 
@@ -16,6 +20,15 @@ def _make_part(entry, name="R", ref=None, pin_names=("p1", "p2"), footprint=""):
     assigned_ref = p.ref
     entry.parts[assigned_ref] = p
     return assigned_ref, p
+
+
+class _FakeLib:
+    """Minimal stand-in for a real KiCad SchLib."""
+
+    filename = "Device"
+
+    def __str__(self):
+        return "HUGE_LIBRARY_CATALOG"
 
 
 @pytest.fixture(autouse=True)
@@ -200,6 +213,17 @@ class TestNetToolsWithParts:
         assert result["status"] == "connected"
         assert result["total_connections"] == 1
 
+    def test_connect_pin_name_matches_all_duplicate_pins(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="U", pin_names=("GND", "GND", "VCC"))
+        nets.create_net("GND")
+        result = nets.connect("GND", ref, "GND")
+        assert result["status"] == "connected"
+        assert result["connected_count"] == 2
+        assert result["pins"] == ["1(GND)", "2(GND)"]
+        assert result["total_connections"] == 2
+
     def test_connect_invalid_pin(self):
         circuit.create_circuit("c1")
         entry = manager.get_active()
@@ -226,6 +250,18 @@ class TestNetToolsWithParts:
         result = nets.connect_pins(ref1, "1", ref2, "1", net_name="SIG")
         assert result["status"] == "connected"
         assert result["net"] == "SIG"
+
+    def test_connect_pins_name_matches_all_duplicate_pins(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref1, _ = _make_part(entry, name="U1", pin_names=("GND", "GND", "VCC"))
+        ref2, _ = _make_part(entry, name="U2", pin_names=("GND", "GND", "VCC"))
+        result = nets.connect_pins(ref1, "GND", ref2, "GND", net_name="GND")
+        assert result["status"] == "connected"
+        assert result["pins1"] == [f"{ref1}:1(GND)", f"{ref1}:2(GND)"]
+        assert result["pins2"] == [f"{ref2}:1(GND)", f"{ref2}:2(GND)"]
+        listed = nets.list_nets()
+        assert listed["nets"][0]["connection_count"] == 4
 
 
 class TestGenerateToolsWithParts:
@@ -261,8 +297,51 @@ class TestGenerateToolsWithParts:
         assert "Part(" in result["content"]
         assert "Net(" in result["content"]
 
+    def test_generate_bom_uses_library_filename_not_full_catalog(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        entry.parts["R1"] = SimpleNamespace(
+            name="R",
+            value="10k",
+            footprint="",
+            lib=_FakeLib(),
+            pins=[],
+        )
+        result = generate.generate_bom(output_format="json")
+        assert result["status"] == "ok"
+        items = json.loads(result["content"])
+        assert items[0]["library"] == "Device"
+        assert "HUGE_LIBRARY_CATALOG" not in result["content"]
+
+    def test_export_python_uses_library_filename_not_full_catalog(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        entry.parts["R1"] = SimpleNamespace(
+            name="R",
+            value="10k",
+            footprint="",
+            lib=_FakeLib(),
+            pins=[],
+        )
+        result = generate.export_python()
+        assert result["status"] == "ok"
+        assert "Part('Device', 'R'" in result["content"]
+        assert "HUGE_LIBRARY_CATALOG" not in result["content"]
+
 
 class TestValidateToolsWithParts:
+    def test_run_erc_reports_logger_warnings_for_bad_circuit(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        ref, _ = _make_part(entry, name="R", pin_names=("p1", "p2"))
+        nets.create_net("VIN")
+        nets.connect("VIN", ref, "1")
+        result = validate.run_erc()
+        assert result["status"] == "ok"
+        assert result["passed"] is False
+        assert result["warning_count"] + result["error_count"] > 0
+        assert result["raw_output"]
+
     def test_check_connections_all_unconnected(self):
         circuit.create_circuit("c1")
         entry = manager.get_active()
@@ -440,6 +519,19 @@ class TestSummaryLibraryField:
         lib_value = result["parts"][0]["library"]
         assert lib_value is None
 
+    def test_summary_uses_library_filename_not_full_catalog(self):
+        circuit.create_circuit("c1")
+        entry = manager.get_active()
+        entry.parts["R1"] = SimpleNamespace(
+            name="R",
+            value="10k",
+            footprint="",
+            lib=_FakeLib(),
+            pins=[],
+        )
+        result = entry.summary()
+        assert result["parts"][0]["library"] == "Device"
+
 
 class TestExternalToolGracefulFailure:
     """External/experimental SKiDL features must return error dicts, never raise.
@@ -545,3 +637,36 @@ class TestSearchPartsSkipsUnopenableLibraries:
         result = parts.search_parts("resistor")
         assert result["status"] == "error"
         assert "boom" in result["message"]
+
+
+class TestKiCadLibraryConfiguration:
+    """KiCad library discovery must feed SKiDL, not just resources."""
+
+    def test_find_kicad_lib_paths_includes_kicad10_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("KICAD10_SYMBOL_DIR", str(tmp_path))
+        assert str(tmp_path) in resources._find_kicad_lib_paths()
+
+    def test_configure_kicad_library_paths_appends_discovered_paths(self, monkeypatch, tmp_path):
+        original = list(lib_search_paths.get(KICAD, []))
+        monkeypatch.setattr(resources, "_find_kicad_lib_paths", lambda: [str(tmp_path)])
+        try:
+            result = resources.configure_kicad_library_paths()
+            assert result["status"] == "ok"
+            assert result["added_paths"] == [str(tmp_path)]
+            assert str(tmp_path) in [str(p) for p in lib_search_paths[KICAD]]
+        finally:
+            lib_search_paths[KICAD] = original
+
+    def test_kicad_diagnostics_reports_configured_paths_and_library_count(self, monkeypatch, tmp_path):
+        (tmp_path / "FakeDiag.kicad_sym").write_text("(kicad_symbol_lib)", encoding="utf-8")
+        original = list(lib_search_paths.get(KICAD, []))
+        monkeypatch.setattr(resources, "_find_kicad_lib_paths", lambda: [str(tmp_path)])
+        try:
+            result = resources.kicad_diagnostics()
+            assert result["status"] == "ok"
+            assert str(tmp_path) in result["discovered_paths"]
+            assert str(tmp_path) in result["configured_paths"]
+            assert result["library_count"] == 1
+            assert "cache" in result
+        finally:
+            lib_search_paths[KICAD] = original

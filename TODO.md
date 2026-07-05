@@ -1,7 +1,7 @@
 # TODO
 
 ## Done
-1) [DONE] every claude run created skidl.* files — artifacts no longer created
+1) [DONE] every claude run created skidl.* files - artifacts no longer created
    unless actually using the plugin. Fixed via `skidl_quiet` (removes skidl's
    import-time log handlers) + `do_backup=False` on netlist gen; guarded by
    `tests/test_no_artifacts.py`. (commit 48f65bb)
@@ -12,14 +12,21 @@
 3) [DONE] thorough repo review written up as a prioritized upgrade roadmap in
    PLAN.md. (commit facd9a6)
 
-## Next (recommended, from PLAN.md — NOT yet implemented)
-The review found the plugin's core loop is silently broken on a real machine.
-These are the *fixes*, not the plan; awaiting go-ahead:
-- P0.1 `parts.py:38` `dest=KICAD` → `tool=KICAD` (parts never join the circuit today)
-- P0.2 `validate.py` ERC capture (run_erc always reports passed=True)
-- P0.3 `str(part.lib)` → `part.lib.filename` (circuit_manager.py:38, generate.py:141,279)
-- P0.4 wire discovered KiCad lib paths into skidl at startup (+ KiCad 10)
-- P0.5 multi-pin connect (nets.py:55-59, 242-248)
-- P0.6 real-KiCad integration test tier (would have caught all of the above)
+4) [DONE] P0 reliability fixes from PLAN.md:
+   - `add_part` now passes `tool=KICAD`, so real KiCad parts join the circuit.
+   - `run_erc` captures SKiDL's `erc_logger` records and reports warnings/errors.
+   - summaries, BOMs, and Python export use `part.lib.filename` instead of the
+     full library catalog string.
+   - KiCad 10/library discovery is fed into `skidl.lib_search_paths[KICAD]` at
+     server startup, with a `kicad_diagnostics` tool.
+   - pin-name connections now connect all matching pins and report the set.
+   - `tests/test_integration_kicad.py` covers the real-symbol add/wire/ERC/export
+     path when KiCad symbols are available.
 
-See PLAN.md for the full P0–P3 roadmap.
+## Next (recommended, from PLAN.md)
+P0 is complete. Continue with the highest-value roadmap items:
+- P3.1 + P3.2 README/package correctness fixes.
+- P1.1 design-as-code save/load/import persistence.
+- P1.2 file-based KiCad/kicad-buddy handoff.
+
+See PLAN.md for the full P0-P3 roadmap.

@@ -52,29 +52,26 @@ def connect(net_name: str, ref: str, pin: str) -> dict:
         net = manager.find_net(net_name, entry)
         part = manager.find_part(ref, entry)
 
-        # Try pin by number first, then by name
-        target_pin = None
-        for p in part.pins:
-            if str(p.num) == str(pin) or p.name == pin:
-                target_pin = p
-                break
+        target_pins = _find_pins(part, pin, ref)
+        if isinstance(target_pins, dict):
+            return target_pins
 
-        if target_pin is None:
-            pin_list = [f"{p.num}({p.name})" for p in part.pins]
-            return {
-                "status": "error",
-                "message": f"Pin '{pin}' not found on {ref}. Available pins: {pin_list}",
-            }
+        for target_pin in target_pins:
+            net += target_pin
 
-        net += target_pin
+        pin_labels = [_pin_label(p) for p in target_pins]
+        warnings = _multiple_match_warnings(ref, pin, target_pins)
 
         return {
             "status": "connected",
             "net": net_name,
             "part": ref,
-            "pin": f"{target_pin.num}({target_pin.name})",
+            "pin": pin_labels[0],
+            "pins": pin_labels,
+            "connected_count": len(target_pins),
             "total_connections": len(net.pins),
-            "message": f"Connected {ref} pin {target_pin.num}({target_pin.name}) to net '{net_name}'.",
+            "warnings": warnings,
+            "message": f"Connected {len(target_pins)} pin(s) on {ref} to net '{net_name}'.",
         }
     except (KeyError, RuntimeError) as e:
         return {"status": "error", "message": str(e)}
@@ -98,13 +95,12 @@ def connect_pins(ref1: str, pin1: str, ref2: str, pin2: str, net_name: str = "")
         part1 = manager.find_part(ref1, entry)
         part2 = manager.find_part(ref2, entry)
 
-        # Find pins
-        p1 = _find_pin(part1, pin1, ref1)
-        p2 = _find_pin(part2, pin2, ref2)
-        if isinstance(p1, dict):
-            return p1  # Error
-        if isinstance(p2, dict):
-            return p2  # Error
+        pins1 = _find_pins(part1, pin1, ref1)
+        pins2 = _find_pins(part2, pin2, ref2)
+        if isinstance(pins1, dict):
+            return pins1
+        if isinstance(pins2, dict):
+            return pins2
 
         # Create or reuse net
         if net_name:
@@ -125,14 +121,27 @@ def connect_pins(ref1: str, pin1: str, ref2: str, pin2: str, net_name: str = "")
             entry.nets[unique_name] = net
             net_name = unique_name
 
-        net += p1, p2
+        for pin_obj in [*pins1, *pins2]:
+            net += pin_obj
+
+        pin_labels1 = [_ref_pin_label(ref1, p) for p in pins1]
+        pin_labels2 = [_ref_pin_label(ref2, p) for p in pins2]
+        warnings = [
+            *_multiple_match_warnings(ref1, pin1, pins1),
+            *_multiple_match_warnings(ref2, pin2, pins2),
+        ]
 
         return {
             "status": "connected",
             "net": net_name,
-            "pin1": f"{ref1}:{p1.num}({p1.name})",
-            "pin2": f"{ref2}:{p2.num}({p2.name})",
-            "message": f"Connected {ref1}:{p1.name} to {ref2}:{p2.name} via net '{net_name}'.",
+            "pin1": pin_labels1[0],
+            "pin2": pin_labels2[0],
+            "pins1": pin_labels1,
+            "pins2": pin_labels2,
+            "connected_count": len(pins1) + len(pins2),
+            "total_connections": len(net.pins),
+            "warnings": warnings,
+            "message": f"Connected {len(pins1)} pin(s) on {ref1} to {len(pins2)} pin(s) on {ref2} via net '{net_name}'.",
         }
     except (KeyError, RuntimeError) as e:
         return {"status": "error", "message": str(e)}
@@ -240,10 +249,24 @@ def add_power_nets() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def _find_pin(part, pin_id: str, ref: str):
-    """Find a pin on a part by number or name. Returns pin or error dict."""
-    for p in part.pins:
-        if str(p.num) == str(pin_id) or p.name == pin_id:
-            return p
+def _find_pins(part, pin_id: str, ref: str):
+    """Find all pins on a part by number or name. Returns pins or error dict."""
+    matches = [p for p in part.pins if str(p.num) == str(pin_id) or p.name == pin_id]
+    if matches:
+        return matches
     pin_list = [f"{p.num}({p.name})" for p in part.pins]
     return {"status": "error", "message": f"Pin '{pin_id}' not found on {ref}. Available: {pin_list}"}
+
+
+def _pin_label(pin) -> str:
+    return f"{pin.num}({pin.name})"
+
+
+def _ref_pin_label(ref: str, pin) -> str:
+    return f"{ref}:{_pin_label(pin)}"
+
+
+def _multiple_match_warnings(ref: str, pin_id: str, pins: list) -> list[str]:
+    if len(pins) <= 1:
+        return []
+    return [f"Pin identifier '{pin_id}' matched {len(pins)} pins on {ref}; connected all matches."]

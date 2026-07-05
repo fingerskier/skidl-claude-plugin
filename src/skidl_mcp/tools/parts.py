@@ -36,7 +36,7 @@ def add_part(
     try:
         entry = manager.get_active()
 
-        kwargs = {"dest": KICAD}
+        kwargs = {"tool": KICAD}
         if value:
             kwargs["value"] = value
         if footprint:

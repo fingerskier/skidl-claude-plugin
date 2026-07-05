@@ -15,6 +15,23 @@ import skidl_mcp.skidl_quiet  # noqa: F401  (must precede any skidl import)
 from skidl import Bus, Circuit, Net, Part
 
 
+def part_library_name(part: Any, default: str | None = None) -> str | None:
+    """Return a compact library name for a SKiDL part."""
+    lib = getattr(part, "lib", None)
+    if lib is None:
+        return default
+
+    filename = getattr(lib, "filename", None)
+    if filename:
+        return str(filename)
+
+    name = getattr(lib, "name", None)
+    if name:
+        return str(name)
+
+    return str(lib)
+
+
 @dataclass
 class CircuitEntry:
     """A named circuit with its SKiDL Circuit object and metadata."""
@@ -36,7 +53,7 @@ class CircuitEntry:
                 "name": part.name,
                 "value": str(v) if (v := getattr(part, "value", None)) is not None else None,
                 "footprint": str(fp) if (fp := getattr(part, "footprint", None)) is not None else None,
-                "library": str(lib) if (lib := getattr(part, "lib", None)) is not None else None,
+                "library": part_library_name(part),
                 "pin_count": len(part.pins),
             })
 

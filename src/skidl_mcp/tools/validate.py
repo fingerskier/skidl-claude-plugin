@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
-import io
+import logging
 
 from skidl_mcp.circuit_manager import manager
 
@@ -26,30 +25,30 @@ def run_erc() -> dict:
         if not entry.parts:
             return {"status": "error", "message": "Circuit has no parts. Add parts before running ERC."}
 
-        # Capture ERC output (SKiDL prints to stderr and stdout)
-        captured_out = io.StringIO()
-        captured_err = io.StringIO()
-        with contextlib.redirect_stdout(captured_out), contextlib.redirect_stderr(captured_err):
-            erc_result = entry.circuit.ERC()
+        records: list[logging.LogRecord] = []
+        handler = _ErcCaptureHandler(records)
 
-        erc_output = captured_err.getvalue() + captured_out.getvalue()
+        from skidl.logger import erc_logger
 
-        # Parse warnings and errors
+        erc_logger.addHandler(handler)
+        try:
+            entry.circuit.ERC()
+        finally:
+            erc_logger.removeHandler(handler)
+
         warnings = []
         errors = []
-        for line in erc_output.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            lower = line.lower()
-            if "warning" in lower:
-                warnings.append(line)
-            elif "error" in lower:
+        output_lines = []
+        for record in records:
+            line = _format_erc_record(record)
+            output_lines.append(line)
+            if record.levelno >= logging.ERROR:
                 errors.append(line)
-            else:
+            elif record.levelno >= logging.WARNING:
                 warnings.append(line)
 
-        passed = len(errors) == 0
+        erc_output = "\n".join(output_lines)
+        passed = len(errors) == 0 and len(warnings) == 0
 
         return {
             "status": "ok",
@@ -58,11 +57,31 @@ def run_erc() -> dict:
             "warnings": warnings,
             "error_count": len(errors),
             "warning_count": len(warnings),
-            "raw_output": erc_output.strip(),
-            "message": "ERC passed." if passed else f"ERC failed with {len(errors)} error(s) and {len(warnings)} warning(s).",
+            "raw_output": erc_output,
+            "message": (
+                "ERC passed."
+                if passed
+                else f"ERC found {len(errors)} error(s) and {len(warnings)} warning(s)."
+            ),
         }
     except RuntimeError as e:
         return {"status": "error", "message": str(e)}
+
+
+class _ErcCaptureHandler(logging.Handler):
+    """Collect SKiDL ERC logger records for structured reporting."""
+
+    def __init__(self, records: list[logging.LogRecord]) -> None:
+        super().__init__(level=logging.NOTSET)
+        self.records = records
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+def _format_erc_record(record: logging.LogRecord) -> str:
+    """Format a SKiDL ERC log record like SKiDL's default console output."""
+    return f"ERC {record.levelname}: {record.getMessage()}"
 
 
 def check_connections() -> dict:

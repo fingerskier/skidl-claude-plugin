@@ -41,3 +41,6 @@ packages = ["src/skidl_mcp"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+markers = [
+    "integration_kicad: tests that use real KiCad symbol libraries when available",
+]

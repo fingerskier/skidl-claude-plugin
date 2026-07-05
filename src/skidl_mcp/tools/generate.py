@@ -11,7 +11,7 @@ import re
 import shutil
 import tempfile
 
-from skidl_mcp.circuit_manager import manager
+from skidl_mcp.circuit_manager import manager, part_library_name
 
 
 def _to_python_var(name: str, seen: set[str]) -> str:
@@ -140,7 +140,7 @@ def generate_bom(output_format: str = "json") -> dict:
         groups: dict[tuple, list[str]] = {}
         for ref, part in entry.parts.items():
             key = (
-                str(getattr(part, "lib", "") or ""),
+                part_library_name(part, "") or "",
                 part.name,
                 str(getattr(part, "value", "") or ""),
                 str(getattr(part, "footprint", "") or ""),
@@ -278,7 +278,7 @@ def export_python() -> dict:
         for ref, part in entry.parts.items():
             var_name = _to_python_var(ref, seen_vars)
             part_vars[ref] = var_name
-            lib = str(getattr(part, "lib", "Device") or "Device")
+            lib = part_library_name(part, "Device") or "Device"
             value = str(getattr(part, "value", "") or "")
             footprint = str(getattr(part, "footprint", "") or "")
             args = [repr(lib), repr(part.name)]
