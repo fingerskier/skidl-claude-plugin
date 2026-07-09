@@ -12,6 +12,7 @@ import shutil
 import tempfile
 
 from skidl_mcp.circuit_manager import manager, part_library_name
+from skidl_mcp.tools.artifact_io import finalize_artifact
 
 
 def _to_python_var(name: str, seen: set[str]) -> str:
@@ -31,13 +32,17 @@ def _to_python_var(name: str, seen: set[str]) -> str:
     return var
 
 
-def generate_netlist() -> dict:
+def generate_netlist(output_path: str | None = None) -> dict:
     """Generate a KiCad-compatible netlist for the active circuit.
 
-    The netlist can be imported into KiCad's PCBNEW for PCB layout.
+    The netlist can be imported into KiCad's PCBNEW for board layout.
+
+    Args:
+        output_path: If given, write the netlist to this file and return a
+            compact ``{path, summary, warnings}`` response instead of inline text.
 
     Returns:
-        Netlist content as text.
+        Netlist content as text, or a compact path-based response.
     """
     try:
         entry = manager.get_active()
@@ -58,23 +63,35 @@ def generate_netlist() -> dict:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-        return {
-            "status": "ok",
-            "format": "kicad_netlist",
-            "content": netlist_content,
-            "parts_count": len(entry.parts),
-            "nets_count": len(entry.nets),
-            "message": f"Netlist generated for circuit '{entry.name}' with {len(entry.parts)} parts and {len(entry.nets)} nets.",
-        }
+        return finalize_artifact(
+            netlist_content,
+            output_path,
+            fmt="kicad_netlist",
+            summary={"parts": len(entry.parts), "nets": len(entry.nets)},
+            message=(
+                f"Netlist generated for circuit '{entry.name}' with "
+                f"{len(entry.parts)} parts and {len(entry.nets)} nets."
+            ),
+            inline_extra={
+                "parts_count": len(entry.parts),
+                "nets_count": len(entry.nets),
+            },
+        )
     except (RuntimeError, FileNotFoundError, OSError) as e:
         return {"status": "error", "message": str(e)}
 
 
-def generate_svg() -> dict:
+def generate_svg(output_path: str | None = None) -> dict:
     """Generate an SVG schematic diagram of the active circuit.
 
+    Args:
+        output_path: If given, write the SVG to this file and return a compact
+            ``{path, summary, warnings}`` response instead of inline text. Only
+            the ``.svg`` is written; SKiDL's ``.json``/``_skin.svg`` intermediates
+            stay in a temp directory and are discarded.
+
     Returns:
-        SVG content as a string that can be rendered as an image.
+        SVG content as a string, or a compact path-based response.
     """
     try:
         entry = manager.get_active()
@@ -109,19 +126,22 @@ def generate_svg() -> dict:
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    return {
-        "status": "ok",
-        "format": "svg",
-        "content": svg_content,
-        "message": f"SVG schematic generated for circuit '{entry.name}'.",
-    }
+    return finalize_artifact(
+        svg_content,
+        output_path,
+        fmt="svg",
+        summary={"parts": len(entry.parts), "nets": len(entry.nets)},
+        message=f"SVG schematic generated for circuit '{entry.name}'.",
+    )
 
 
-def generate_bom(output_format: str = "json") -> dict:
+def generate_bom(output_format: str = "json", output_path: str | None = None) -> dict:
     """Generate a Bill of Materials (BOM) for the active circuit.
 
     Args:
         output_format: Output format - "json" for structured data, "csv" for spreadsheet-compatible.
+        output_path: If given, write the BOM to this file and return a compact
+            ``{path, summary, warnings}`` response instead of inline text.
 
     Returns:
         BOM listing all unique parts with quantities and details.
@@ -178,25 +198,32 @@ def generate_bom(output_format: str = "json") -> dict:
         else:
             content = json.dumps(bom_items, indent=2)
 
-        return {
-            "status": "ok",
-            "format": output_format,
-            "content": content,
-            "unique_parts": len(bom_items),
-            "total_parts": len(entry.parts),
-            "message": f"BOM generated: {len(bom_items)} unique parts, {len(entry.parts)} total.",
-        }
+        return finalize_artifact(
+            content,
+            output_path,
+            fmt=output_format,
+            summary={"unique_parts": len(bom_items), "total_parts": len(entry.parts)},
+            message=f"BOM generated: {len(bom_items)} unique parts, {len(entry.parts)} total.",
+            inline_extra={
+                "unique_parts": len(bom_items),
+                "total_parts": len(entry.parts),
+            },
+        )
     except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}
 
 
-def generate_kicad_schematic() -> dict:
+def generate_kicad_schematic(output_path: str | None = None) -> dict:
     """Generate a KiCad schematic file (.kicad_sch) for the active circuit.
 
     The schematic can be opened in KiCad's schematic editor (Eeschema).
 
+    Args:
+        output_path: If given, write the schematic to this file and return a
+            compact ``{path, summary, warnings}`` response instead of inline text.
+
     Returns:
-        KiCad schematic file content.
+        KiCad schematic file content, or a compact path-based response.
     """
     try:
         entry = manager.get_active()
@@ -233,21 +260,30 @@ def generate_kicad_schematic() -> dict:
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    return {
-        "status": "ok",
-        "format": "kicad_sch",
-        "content": content,
-        "message": f"KiCad schematic generated for circuit '{entry.name}'.",
-    }
+    return finalize_artifact(
+        content,
+        output_path,
+        fmt="kicad_sch",
+        summary={"parts": len(entry.parts), "nets": len(entry.nets)},
+        message=f"KiCad schematic generated for circuit '{entry.name}'.",
+    )
 
 
-def export_python() -> dict:
-    """Export the active circuit as standalone SKiDL Python code.
+def export_python(output_path: str | None = None) -> dict:
+    """Export the active circuit as SKiDL Python code.
 
-    The generated code can be run independently to recreate the circuit.
+    The generated script recreates the circuit by re-instantiating each part from
+    its source library. Re-running it therefore needs those same libraries: parts
+    added from KiCad symbol libraries require a KiCad install (bare parts are
+    emitted against the ``Device`` library and likewise need it). It is a faithful
+    round-trip of the design, not a dependency-free standalone program.
+
+    Args:
+        output_path: If given, write the code to this file and return a compact
+            ``{path, summary, warnings}`` response instead of inline text.
 
     Returns:
-        Python source code as a string.
+        Python source code as a string, or a compact path-based response.
     """
     try:
         entry = manager.get_active()
@@ -315,11 +351,16 @@ def export_python() -> dict:
 
         code = "\n".join(lines)
 
-        return {
-            "status": "ok",
-            "format": "python",
-            "content": code,
-            "message": f"Python SKiDL code exported for circuit '{entry.name}'.",
-        }
+        return finalize_artifact(
+            code,
+            output_path,
+            fmt="python",
+            summary={
+                "parts": len(entry.parts),
+                "nets": len(entry.nets),
+                "lines": len(lines),
+            },
+            message=f"Python SKiDL code exported for circuit '{entry.name}'.",
+        )
     except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}

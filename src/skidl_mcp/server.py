@@ -1,7 +1,9 @@
 """SKiDL MCP Server - Design electronic circuits with Claude.
 
-Provides MCP tools, resources, and prompts for building electronic
-schematics and PCB layouts using the SKiDL Python library.
+Provides MCP tools, resources, and prompts for schematic-as-code design:
+building circuits, validating connectivity (ERC), and exporting
+netlists/BOMs/SVG/.kicad_sch artifacts for downstream board layout in KiCad,
+using the SKiDL Python library.
 """
 
 from __future__ import annotations
@@ -214,49 +216,71 @@ def add_power_nets() -> dict:
 # ── Generation Tools ────────────────────────────────────────────────────────
 
 @mcp.tool()
-def generate_netlist() -> dict:
+def generate_netlist(output_path: str = "") -> dict:
     """Generate a KiCad-compatible netlist for the active circuit.
 
-    The netlist can be imported into KiCad's PCBNEW for PCB layout.
+    The netlist can be imported into KiCad's PCBNEW for board layout.
+
+    Args:
+        output_path: Optional file path. When set, the netlist is written to
+            disk and the response is compact ({path, summary, warnings}) instead
+            of returning the full netlist inline.
     """
-    return generate.generate_netlist()
+    return generate.generate_netlist(output_path or None)
 
 
 @mcp.tool()
-def generate_svg() -> dict:
+def generate_svg(output_path: str = "") -> dict:
     """Generate an SVG schematic diagram of the active circuit.
 
     Returns SVG content that can be rendered as an image.
+
+    Args:
+        output_path: Optional file path. When set, the SVG is written to disk
+            and the response is compact instead of returning the SVG inline.
     """
-    return generate.generate_svg()
+    return generate.generate_svg(output_path or None)
 
 
 @mcp.tool()
-def generate_bom(output_format: str = "json") -> dict:
+def generate_bom(output_format: str = "json", output_path: str = "") -> dict:
     """Generate a Bill of Materials (BOM) for the active circuit.
 
     Args:
         output_format: Output format - "json" for structured data, "csv" for spreadsheet.
+        output_path: Optional file path. When set, the BOM is written to disk
+            and the response is compact instead of returning the BOM inline.
     """
-    return generate.generate_bom(output_format)
+    return generate.generate_bom(output_format, output_path or None)
 
 
 @mcp.tool()
-def generate_kicad_schematic() -> dict:
+def generate_kicad_schematic(output_path: str = "") -> dict:
     """Generate a KiCad schematic file (.kicad_sch) for the active circuit.
 
     The schematic can be opened in KiCad's Eeschema.
+
+    Args:
+        output_path: Optional file path. When set, the schematic is written to
+            disk and the response is compact instead of returning it inline.
     """
-    return generate.generate_kicad_schematic()
+    return generate.generate_kicad_schematic(output_path or None)
 
 
 @mcp.tool()
-def export_python() -> dict:
-    """Export the active circuit as standalone SKiDL Python code.
+def export_python(output_path: str = "") -> dict:
+    """Export the active circuit as SKiDL Python code.
 
-    The generated code can be run independently to recreate the circuit.
+    The generated script recreates the circuit by re-instantiating each part from
+    its source library, so re-running it needs those same libraries (a KiCad
+    install for parts from KiCad symbol libraries). It is a faithful round-trip of
+    the design, not a dependency-free standalone program.
+
+    Args:
+        output_path: Optional file path. When set, the code is written to disk
+            and the response is compact instead of returning the code inline.
     """
-    return generate.export_python()
+    return generate.export_python(output_path or None)
 
 
 # ── Validation Tools ────────────────────────────────────────────────────────

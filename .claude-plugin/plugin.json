@@ -1,7 +1,7 @@
 {
   "name": "skidl",
   "version": "2026.6.8",
-  "description": "Design electronic schematics and PCB layouts using SKiDL — create circuits with Python code, validate designs, and export to KiCad.",
+  "description": "Schematic-as-code circuit design with SKiDL — build circuits in Python, validate connectivity, and export netlists, BOMs, SVG, and KiCad schematics for board layout in KiCad.",
   "author": {
     "name": "Matt Currier"
   },

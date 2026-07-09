@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "skidl-mcp"
 version = "2026.6.8"
-description = "MCP server for designing electronic schematics and PCB layouts using SKiDL"
+description = "MCP server for schematic-as-code circuit design with SKiDL: build circuits, validate, and export netlists/BOM/SVG/KiCad schematics for board layout in KiCad"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

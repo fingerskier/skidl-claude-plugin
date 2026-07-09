@@ -1,6 +1,6 @@
 # skidl-claude-plugin
 
-MCP server for designing electronic schematics and PCB layouts using [SKiDL](https://github.com/devbisme/skidl) — a Python library for programmatic circuit design.
+MCP server for **schematic-as-code** circuit design using [SKiDL](https://github.com/devbisme/skidl) — a Python library for programmatic circuit design. Build circuits, validate connectivity, and export netlists, BOMs, SVG, and KiCad `.kicad_sch` files for downstream **board layout in KiCad**. The plugin does not place or route PCBs itself — that stays in KiCad's PCBNEW (see [Division of labor](#division-of-labor)).
 
 ## Features
 
@@ -11,7 +11,7 @@ MCP server for designing electronic schematics and PCB layouts using [SKiDL](htt
 - **Netlist Export** — Generate KiCad-compatible netlists for PCB layout in PCBNEW
 - **Validation** — Run electrical rules checks (ERC), verify connections and footprints
 - **BOM Generation** — Bill of materials in JSON or CSV format
-- **Code Export** — Export circuits as standalone SKiDL Python scripts
+- **Code Export** — Export circuits as SKiDL Python scripts that recreate the design (re-running needs the parts' source libraries)
 - **16 Design Templates** — Prompt templates for common circuits (voltage dividers, amplifiers, filters, MCU designs, motor drivers, USB interfaces, and more)
 
 ## Prerequisites
@@ -19,6 +19,44 @@ MCP server for designing electronic schematics and PCB layouts using [SKiDL](htt
 - Python 3.10+
 - [KiCad](https://www.kicad.org/) installed — only required for adding parts and searching component libraries. Circuit building, validation, and netlist/BOM/Python export work without it.
 - *Optional:* [`netlistsvg`](https://github.com/nturley/netlistsvg) for `generate_svg`. SKiDL's `generate_kicad_schematic` is experimental and needs parts from real KiCad symbol libraries.
+
+## Capability matrix
+
+What works depends on what you have installed. Circuit building, wiring, validation,
+and text exports never need KiCad; the symbol-dependent and rendering features do.
+
+| Capability | No KiCad | KiCad libraries available | KiCad libs + `netlistsvg` |
+|------------|:--------:|:-------------------------:|:-------------------------:|
+| Create/switch circuits, nets, buses | ✅ | ✅ | ✅ |
+| `add_part` / `search_parts` (needs symbol libs) | ❌ | ✅ | ✅ |
+| Wiring, `run_erc`, `check_connections` | ✅ | ✅ | ✅ |
+| `generate_netlist` (KiCad netlist) | ✅ | ✅ | ✅ |
+| `generate_bom` (JSON/CSV) | ✅ | ✅ | ✅ |
+| `export_python` | ✅ | ✅ | ✅ |
+| `validate_footprints` | ✅ | ✅ | ✅ |
+| `generate_kicad_schematic` (experimental) | ❌¹ | ⚠️ | ⚠️ |
+| `generate_svg` | ❌ | ❌ | ✅ |
+
+¹ SKiDL's schematic generator is experimental and needs parts sourced from real KiCad
+symbol libraries (added via `add_part`), not bare parts — so it effectively requires
+KiCad. Rows marked ⚠️ run but may fail on parts SKiDL can't lay out.
+
+## Division of labor
+
+This plugin owns **schematic-as-code**: describing a circuit in Python, checking it,
+and emitting the standard interchange files. It does **not** place footprints or route
+copper — that is board layout, and it stays in KiCad's PCBNEW.
+
+```
+skidl-claude-plugin                         │  KiCad
+  build + wire + validate (ERC)             │
+  generate_netlist  ─────────────────────►  │  import into PCBNEW → place & route PCB
+  generate_kicad_schematic  ─────────────►  │  open in Eeschema → edit schematic
+  generate_bom / generate_svg / export_python
+```
+
+The handoff artifact is the **netlist** (and optionally the `.kicad_sch`): design and
+verify the schematic here, then take those files into KiCad for physical layout.
 
 ## Installation
 
@@ -109,7 +147,14 @@ Then ask Claude to design circuits:
 | `generate_svg` | SVG schematic diagram |
 | `generate_bom` | Bill of materials (JSON or CSV) |
 | `generate_kicad_schematic` | KiCad `.kicad_sch` file |
-| `export_python` | Standalone SKiDL Python code |
+| `export_python` | SKiDL Python code that recreates the circuit (needs the parts' source libraries to re-run) |
+
+Every generator accepts an optional **`output_path`**. When given, the artifact is
+written to that file and the tool returns a compact `{status, format, path, bytes,
+summary}` response — the full content is **not** echoed back into the model context.
+Omit `output_path` to get the content inline (large artifacts are truncated with a
+warning that points you at `output_path`). Prefer `output_path` for anything you
+intend to open in KiCad or keep on disk.
 
 ### Validation
 | Tool | Description |
@@ -134,7 +179,7 @@ Use these prompts to guide circuit design:
 
 ```bash
 pip install -e ".[dev]"     # see HOWTO.md §2 if the build trips on kinet2pcb/hierplace
-pytest                      # 74 tests; no PYTHONPATH needed
+pytest                      # 101 tests; no PYTHONPATH needed
 ```
 
 [HOWTO.md](./HOWTO.md) covers local setup (including the SKiDL transitive-dependency

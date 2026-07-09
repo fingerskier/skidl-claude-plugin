@@ -24,5 +24,7 @@ skidl_sklib.py
 # SKiDL run artifacts (named after the running module/script)
 *.erc
 *.log
+# Generated example outputs — the example scripts recreate these on each run.
+examples/*/artifacts/
 bash.exe.stackdump
 err.txt
