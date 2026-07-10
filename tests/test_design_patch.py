@@ -348,3 +348,26 @@ class TestCrossFieldValidation:
         })
         assert res["status"] == "error"
         assert any("N" in e for e in res["errors"])
+
+
+def _kicad_available() -> bool:
+    try:
+        from skidl import Part as _P
+        _P("Device", "R", tool=__import__("skidl").KICAD, dest=__import__("skidl").TEMPLATE)
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _kicad_available(), reason="needs KiCad symbol libraries")
+class TestApplyCreatesPartsFromLibrary:
+    def test_patch_creates_library_part(self):
+        circuit.create_circuit("c")
+        entry = manager.get_active()
+        res = apply_design_patch({
+            "parts": [{"ref": "R1", "lib": "Device", "name": "R", "value": "10k"}],
+        })
+        assert res["status"] == "ok"
+        assert res["applied"]["parts_added"] == ["R1"]
+        assert "R1" in entry.parts
+        assert str(entry.parts["R1"].value) == "10k"

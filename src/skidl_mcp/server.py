@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from skidl_mcp.tools import circuit, parts, nets, generate, validate, project_io
+from skidl_mcp.tools import (
+    circuit, parts, nets, generate, validate, project_io, design_patch, inspect,
+)
 from skidl_mcp.resources import (
     configure_kicad_library_paths,
     get_active_circuit,
@@ -328,6 +330,40 @@ def load_circuit(path: str = "") -> dict:
         path: Project directory. Defaults to the current project directory.
     """
     return project_io.load_circuit(path or None)
+
+
+# ── Design Patch Tools (Phase C) ────────────────────────────────────────────
+
+@mcp.tool()
+def apply_design_patch(patch: dict | str, dry_run: bool = False) -> dict:
+    """Apply a multi-part, multi-net design change in one structured patch.
+
+    Merge semantics: parts/nets listed are created-or-updated and net pins are
+    added. Destructive edits are explicit — ``remove_parts``, ``remove_nets``,
+    ``disconnect: ["R1.2"]``, or a net's ``pins_mode: "set"`` (drops pins not
+    listed). The whole patch is validated first (nothing changes on error) and is
+    rolled back if a mutation fails, so it is atomic and safe to retry.
+
+    Args:
+        patch: a mapping or a YAML/JSON string with any of: parts, nets,
+            interfaces, remove_parts, remove_nets, disconnect. Parts:
+            ref/lib/name/value/footprint/role/fields. Nets: name/role/pins
+            (``"R1.1"``/``"U1.SDA"``)/pins_mode. Interfaces: name/type/nets map.
+        dry_run: validate and report the diff without changing the circuit.
+    """
+    return design_patch.apply_design_patch(patch, dry_run=dry_run)
+
+
+@mcp.tool()
+def inspect_design(by: str = "all", name: str = "", detail: str = "summary") -> dict:
+    """Inspect the active design through a compact, filtered lens.
+
+    Args:
+        by: all | part | net | role | interface | issues.
+        name: narrow to a single part/net/role/interface (ignored for all/issues).
+        detail: summary (counts + names) | full (pins, connections, fields).
+    """
+    return inspect.inspect_design(by=by, name=name, detail=detail)
 
 
 # ── Validation Tools ────────────────────────────────────────────────────────

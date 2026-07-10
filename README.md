@@ -13,6 +13,7 @@ MCP server for **schematic-as-code** circuit design using [SKiDL](https://github
 - **BOM Generation** — Bill of materials in JSON or CSV format
 - **Code Export** — Export circuits as SKiDL Python scripts that recreate the design (re-running needs the parts' source libraries)
 - **Project Persistence** — Save a design to a project directory and reload it in a later session; a deterministic, git-diffable `circuit.json` is the source of truth
+- **Declarative Design Patch** — Apply multi-part, multi-net changes in one structured, atomic patch (`apply_design_patch`), and inspect the design through a compact, filtered lens (`inspect_design`)
 - **16 Design Templates** — Prompt templates for common circuits (voltage dividers, amplifiers, filters, MCU designs, motor drivers, USB interfaces, and more)
 
 ## Prerequisites
@@ -193,6 +194,18 @@ rebuilds the circuit from `circuit.json` **alone** and never imports or executes
 reconstructs library-independent parts from the stored pin table, it works offline with
 no KiCad install; regenerate `circuit.py` (via `export_python`) for a high-fidelity,
 library-backed rebuild when you have the symbol libraries.
+
+### Design Patch (declarative editing)
+| Tool | Description |
+|------|-------------|
+| `apply_design_patch` | Apply a multi-part / multi-net change in one structured, atomic patch (merge semantics; explicit `remove_parts`/`remove_nets`/`disconnect`/`pins_mode:set` for removals; `dry_run` to preview) |
+| `inspect_design` | Compact, filtered read-only view: `by=all\|part\|net\|role\|interface\|issues`, `detail=summary\|full` |
+
+`apply_design_patch` replaces a flurry of low-level calls with one declarative
+edit. It validates the whole patch first (nothing changes on error) and rolls back
+on any mid-apply failure, so it is atomic and safe to retry (re-applying a merge
+patch is a no-op). The patch is a mapping or YAML string with any of `parts`,
+`nets`, `interfaces`, `remove_parts`, `remove_nets`, `disconnect`.
 
 ### Validation
 | Tool | Description |
