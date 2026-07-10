@@ -249,3 +249,61 @@ class TestApplyMerge:
         assert res["status"] == "error" and res.get("rolled_back") is True
         after = project_io.serialize_entry(entry)
         assert before == after  # snapshot restored
+
+
+class TestRemovals:
+    def _wired(self):
+        """R1.1-R2.1 on net N; R1.2 on net GND. Returns entry."""
+        _two_resistors()
+        apply_design_patch({
+            "nets": [
+                {"name": "N", "pins": ["R1.1", "R2.1"]},
+                {"name": "GND", "pins": ["R1.2"]},
+            ],
+        })
+        return manager.get_active()
+
+    def test_remove_parts_detaches_and_deletes(self):
+        entry = self._wired()
+        res = apply_design_patch({"remove_parts": ["R2"]})
+        assert res["status"] == "ok"
+        assert res["applied"]["parts_removed"] == ["R2"]
+        assert "R2" not in entry.parts
+        # R1 untouched.
+        assert "R1" in entry.parts
+
+    def test_remove_nets_drops_net_and_disconnects_members(self):
+        entry = self._wired()
+        res = apply_design_patch({"remove_nets": ["N"]})
+        assert res["status"] == "ok"
+        assert res["applied"]["nets_removed"] == ["N"]
+        assert "N" not in entry.nets
+        # R1 pin 1 no longer connected; R1 pin 2 (GND) still is.
+        assert not entry.parts["R1"].pins[0].is_connected()
+        assert entry.parts["R1"].pins[1].is_connected()
+
+    def test_disconnect_specific_pin_only(self):
+        entry = self._wired()
+        res = apply_design_patch({"disconnect": ["R1.1"]})
+        assert res["status"] == "ok"
+        assert res["applied"]["connections_removed"] == 1
+        assert not entry.parts["R1"].pins[0].is_connected()
+        # R2.1 (same net) is untouched.
+        assert entry.parts["R2"].pins[0].is_connected()
+
+    def test_pins_mode_set_prunes_unlisted_pins(self):
+        entry = self._wired()  # N has R1.1 and R2.1
+        res = apply_design_patch(
+            {"nets": [{"name": "N", "pins": ["R1.1"], "pins_mode": "set"}]})
+        assert res["status"] == "ok"
+        assert res["applied"]["connections_removed"] == 1
+        assert entry.parts["R1"].pins[0].is_connected()      # kept
+        assert not entry.parts["R2"].pins[0].is_connected()  # pruned
+
+    def test_pins_mode_add_keeps_existing(self):
+        entry = self._wired()
+        res = apply_design_patch(
+            {"nets": [{"name": "N", "pins": ["R1.2"], "pins_mode": "add"}]})
+        # add mode never prunes; R2.1 stays.
+        assert res["applied"]["connections_removed"] == 0
+        assert entry.parts["R2"].pins[0].is_connected()

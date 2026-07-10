@@ -437,16 +437,52 @@ def _apply_interfaces(entry, patch: DesignPatch, diff: dict) -> None:
 
 
 def _apply_remove_parts(entry, patch: DesignPatch, diff: dict) -> None:
-    ...  # implemented in Task 4
+    for ref in patch.remove_parts:
+        part = entry.parts[ref]
+        for pin in part.pins:
+            pin.disconnect()
+        entry.circuit.rmv_parts(part)
+        del entry.parts[ref]
+        diff["parts_removed"].append(ref)
 
 
 def _apply_remove_nets(entry, patch: DesignPatch, diff: dict) -> None:
-    ...  # implemented in Task 4
+    for name in patch.remove_nets:
+        net = entry.nets[name]
+        for pin in list(net.pins):
+            pin.disconnect()
+        del entry.nets[name]
+        diff["nets_removed"].append(name)
 
 
 def _apply_disconnect(entry, patch: DesignPatch, diff: dict) -> None:
-    ...  # implemented in Task 4
+    removed = 0
+    for token in patch.disconnect:
+        ref, pin_id = _split_token(token)
+        found = _find_pins(entry.parts[ref], pin_id, ref)
+        if isinstance(found, dict):  # validated already; defend anyway
+            raise _ApplyError(found["message"])
+        for pin in found:
+            if pin.is_connected():
+                pin.disconnect()
+                removed += 1
+    diff["connections_removed"] += removed
 
 
 def _prune_net_pins(net, entry, np: NetPatch) -> int:
-    return 0  # implemented in Task 4
+    """Disconnect pins currently on ``net`` that the patch's pin list omits."""
+    keep = set()
+    for token in np.pins:
+        ref, pin_id = _split_token(token)
+        part = entry.parts.get(ref)
+        if part is None:
+            continue
+        found = _find_pins(part, pin_id, ref)
+        if isinstance(found, list):
+            keep.update(id(p) for p in found)
+    removed = 0
+    for pin in list(net.pins):
+        if id(pin) not in keep:
+            pin.disconnect()
+            removed += 1
+    return removed
