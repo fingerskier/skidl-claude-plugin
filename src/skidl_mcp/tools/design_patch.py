@@ -16,6 +16,8 @@ from typing import Any
 
 import yaml
 
+from skidl_mcp.tools.nets import _find_pins
+
 
 class PatchError(ValueError):
     """A design patch is malformed (bad shape/types) before any semantic check."""
@@ -148,3 +150,80 @@ def _iface_patch(x: Any) -> InterfacePatch:
         type=str(d.get("type", "") or ""),
         nets={str(k): str(v) for k, v in net_map.items()},
     )
+
+
+# ── Validation ────────────────────────────────────────────────────────────
+
+
+def _split_token(token: str) -> tuple[str, str]:
+    """Split a 'REF.pin' token on the last dot into (ref, pin)."""
+    ref, _, pin = token.rpartition(".")
+    return ref, pin
+
+
+def validate_patch(entry, patch: DesignPatch) -> list[str]:
+    """Return actionable errors for anything that would fail; empty == applicable.
+
+    Nets/interfaces may reference parts/nets this same patch creates, so those are
+    treated as present. Pin existence on an *already-present* part is checked here;
+    pins on a to-be-created part are deferred to apply time (can't resolve offline).
+    """
+    errors: list[str] = []
+    created_parts = {p.ref for p in patch.parts}
+    created_nets = {n.name for n in patch.nets}
+
+    for pp in patch.parts:
+        if pp.ref not in entry.parts and not (pp.lib and pp.name):
+            errors.append(
+                f"Part '{pp.ref}' does not exist and cannot be created: provide "
+                f"both 'lib' and 'name'."
+            )
+
+    for np in patch.nets:
+        for token in np.pins:
+            ref, pin = _split_token(token)
+            if not ref or not pin:
+                errors.append(f"Bad pin token '{token}': expected 'REF.pin'.")
+                continue
+            if ref in entry.parts:
+                found = _find_pins(entry.parts[ref], pin, ref)
+                if isinstance(found, dict):
+                    errors.append(f"Token '{token}': {found['message']}")
+            elif ref not in created_parts:
+                errors.append(
+                    f"Net '{np.name}' references pin on unknown part '{ref}'. "
+                    f"Available: {list(entry.parts.keys())}"
+                )
+
+    for token in patch.disconnect:
+        ref, pin = _split_token(token)
+        if ref not in entry.parts:
+            errors.append(
+                f"disconnect '{token}': unknown part '{ref}'. "
+                f"Available: {list(entry.parts.keys())}"
+            )
+            continue
+        found = _find_pins(entry.parts[ref], pin, ref)
+        if isinstance(found, dict):
+            errors.append(found["message"])
+
+    for ref in patch.remove_parts:
+        if ref not in entry.parts:
+            errors.append(
+                f"remove_parts: part '{ref}' not found. Available: {list(entry.parts.keys())}"
+            )
+
+    for name in patch.remove_nets:
+        if name not in entry.nets:
+            errors.append(
+                f"remove_nets: net '{name}' not found. Available: {list(entry.nets.keys())}"
+            )
+
+    for ip in patch.interfaces:
+        for logical, net_name in ip.nets.items():
+            if net_name not in entry.nets and net_name not in created_nets:
+                errors.append(
+                    f"Interface '{ip.name}' maps '{logical}' to unknown net "
+                    f"'{net_name}'. Available: {list(entry.nets.keys())}"
+                )
+    return errors

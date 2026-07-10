@@ -10,6 +10,7 @@ from skidl_mcp.tools.design_patch import (
     NetPatch,
     PartPatch,
     PatchError,
+    validate_patch,
 )
 
 
@@ -73,3 +74,69 @@ class TestSchema:
     def test_bad_pins_mode_raises(self):
         with pytest.raises(PatchError):
             DesignPatch.from_obj({"nets": [{"name": "N", "pins_mode": "wipe"}]})
+
+
+def _two_resistors():
+    """Active circuit with bare R1, R2 (pins 1 & 2). Offline-safe."""
+    circuit.create_circuit("c")
+    entry = manager.get_active()
+    for ref in ("R1", "R2"):
+        p = Part(name="R", tool=SKIDL,
+                 pins=[Pin(num=1, name="p1"), Pin(num=2, name="p2")],
+                 circuit=entry.circuit, ref=ref)
+        entry.parts[ref] = p
+    return entry
+
+
+class TestValidate:
+    def test_valid_patch_has_no_errors(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj({"nets": [{"name": "N", "pins": ["R1.1", "R2.1"]}]})
+        assert validate_patch(entry, patch) == []
+
+    def test_bad_pin_token_reports_error(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj({"nets": [{"name": "N", "pins": ["R1.99"]}]})
+        errors = validate_patch(entry, patch)
+        assert errors and "R1.99" in errors[0]
+
+    def test_unknown_part_ref_in_net_reports_error(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj({"nets": [{"name": "N", "pins": ["R7.1"]}]})
+        errors = validate_patch(entry, patch)
+        assert errors and "R7" in errors[0]
+
+    def test_net_may_reference_pin_on_part_created_by_same_patch(self):
+        entry = _two_resistors()
+        # U1 is being created in this patch; its pins can't be checked offline, so
+        # the token is accepted at validation time (checked at apply).
+        patch = DesignPatch.from_obj({
+            "parts": [{"ref": "U1", "lib": "Device", "name": "R"}],
+            "nets": [{"name": "N", "pins": ["U1.1"]}],
+        })
+        assert validate_patch(entry, patch) == []
+
+    def test_new_part_without_lib_or_name_reports_error(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj({"parts": [{"ref": "U1", "lib": "Device"}]})
+        errors = validate_patch(entry, patch)
+        assert errors and "U1" in errors[0]
+
+    def test_remove_missing_part_reports_error(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj({"remove_parts": ["R9"]})
+        errors = validate_patch(entry, patch)
+        assert errors and "R9" in errors[0]
+
+    def test_disconnect_unknown_ref_reports_error(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj({"disconnect": ["R9.1"]})
+        errors = validate_patch(entry, patch)
+        assert errors and "R9" in errors[0]
+
+    def test_interface_referencing_unknown_net_reports_error(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj(
+            {"interfaces": [{"name": "i2c0", "nets": {"sda": "NOPE"}}]})
+        errors = validate_patch(entry, patch)
+        assert errors and "NOPE" in errors[0]
