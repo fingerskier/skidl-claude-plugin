@@ -304,6 +304,47 @@ class TestRemovals:
         entry = self._wired()
         res = apply_design_patch(
             {"nets": [{"name": "N", "pins": ["R1.2"], "pins_mode": "add"}]})
+        assert res["status"] == "ok"
         # add mode never prunes; R2.1 stays.
         assert res["applied"]["connections_removed"] == 0
         assert entry.parts["R2"].pins[0].is_connected()
+
+
+class TestCrossFieldValidation:
+    def test_disconnect_of_removed_part_is_rejected(self):
+        entry = _two_resistors()
+        before = project_io.serialize_entry(entry)
+        res = apply_design_patch({"remove_parts": ["R2"], "disconnect": ["R2.1"]})
+        assert res["status"] == "error"
+        assert any("R2" in e and "remove_parts" in e for e in res["errors"])
+        assert project_io.serialize_entry(entry) == before  # nothing mutated
+
+    def test_net_pin_on_removed_part_is_rejected(self):
+        entry = _two_resistors()
+        res = apply_design_patch({
+            "remove_parts": ["R2"],
+            "nets": [{"name": "N", "pins": ["R2.1"]}],
+        })
+        assert res["status"] == "error"
+        assert any("R2" in e for e in res["errors"])
+
+    def test_net_pin_on_removed_but_recreated_part_is_allowed_at_validation(self):
+        entry = _two_resistors()
+        patch = DesignPatch.from_obj({
+            "remove_parts": ["R2"],
+            "parts": [{"ref": "R2", "lib": "Device", "name": "R"}],
+            "nets": [{"name": "N", "pins": ["R2.1"]}],
+        })
+        # R2 is re-created, so cross-field validation must NOT flag it; pin
+        # resolution on the to-be-created R2 is deferred. No validation errors.
+        assert validate_patch(entry, patch) == []
+
+    def test_interface_to_removed_net_is_rejected(self):
+        entry = _two_resistors()
+        apply_design_patch({"nets": [{"name": "N", "pins": ["R1.1"]}]})
+        res = apply_design_patch({
+            "remove_nets": ["N"],
+            "interfaces": [{"name": "if0", "nets": {"a": "N"}}],
+        })
+        assert res["status"] == "error"
+        assert any("N" in e for e in res["errors"])

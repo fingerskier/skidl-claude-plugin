@@ -230,6 +230,36 @@ def validate_patch(entry, patch: DesignPatch) -> list[str]:
                     f"Interface '{ip.name}' maps '{logical}' to unknown net "
                     f"'{net_name}'. Available: {list(entry.nets.keys())}"
                 )
+
+    # Cross-field consistency: an operation must not target an entity this same
+    # patch removes earlier in the apply order (unless a later phase re-creates it).
+    removed_parts = set(patch.remove_parts)
+    removed_nets = set(patch.remove_nets)
+
+    for token in patch.disconnect:
+        ref, _ = _split_token(token)
+        if ref in removed_parts:
+            errors.append(
+                f"disconnect '{token}': part '{ref}' is also in remove_parts; "
+                f"cannot disconnect a pin on a part the same patch removes."
+            )
+
+    for np in patch.nets:
+        for token in np.pins:
+            ref, _ = _split_token(token)
+            if ref in removed_parts and ref not in created_parts:
+                errors.append(
+                    f"Net '{np.name}' references pin on part '{ref}' which the same "
+                    f"patch removes and does not re-create."
+                )
+
+    for ip in patch.interfaces:
+        for logical, net_name in ip.nets.items():
+            if net_name in removed_nets and net_name not in created_nets:
+                errors.append(
+                    f"Interface '{ip.name}' maps '{logical}' to net '{net_name}' "
+                    f"which the same patch removes and does not re-create."
+                )
     return errors
 
 
