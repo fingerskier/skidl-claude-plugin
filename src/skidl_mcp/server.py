@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from skidl_mcp.tools import circuit, parts, nets, generate, validate
+from skidl_mcp.tools import circuit, parts, nets, generate, validate, project_io
 from skidl_mcp.resources import (
     configure_kicad_library_paths,
     get_active_circuit,
@@ -281,6 +281,53 @@ def export_python(output_path: str = "") -> dict:
             and the response is compact instead of returning the code inline.
     """
     return generate.export_python(output_path or None)
+
+
+# ── Project Persistence Tools ───────────────────────────────────────────────
+
+@mcp.tool()
+def open_project(path: str) -> dict:
+    """Open a project directory as the active design's source of truth.
+
+    A project directory persists a design across sessions. This creates the
+    ``artifacts/`` and ``worlds/`` skeleton if needed, remembers the directory so
+    a later ``save_circuit()`` needs no path, and — if the directory already holds
+    a ``circuit.json`` — loads that design and makes it active. Loading reads only
+    ``circuit.json``; it never executes the project's ``circuit.py``.
+
+    Args:
+        path: Project directory (created if it does not exist).
+    """
+    return project_io.open_project(path)
+
+
+@mcp.tool()
+def save_circuit(path: str = "") -> dict:
+    """Save the active circuit to a project directory (its source of truth).
+
+    Writes ``circuit.json`` (authoritative, deterministic, git-diffable structure),
+    ``design.yaml`` (human metadata: name, description, requirements) and a
+    ``circuit.py`` view. Saving the same circuit twice is byte-identical.
+
+    Args:
+        path: Project directory. Defaults to the directory from the most recent
+            open_project/save_circuit/load_circuit call.
+    """
+    return project_io.save_circuit(path or None)
+
+
+@mcp.tool()
+def load_circuit(path: str = "") -> dict:
+    """Load a circuit from a project directory, making it the active design.
+
+    Structure is read from ``circuit.json`` only — the project's ``circuit.py`` is
+    never imported or executed — so loading is safe and works offline without a
+    KiCad install. An in-memory circuit of the same name is replaced.
+
+    Args:
+        path: Project directory. Defaults to the current project directory.
+    """
+    return project_io.load_circuit(path or None)
 
 
 # ── Validation Tools ────────────────────────────────────────────────────────

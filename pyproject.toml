@@ -23,6 +23,7 @@ classifiers = [
 dependencies = [
     "skidl>=2.2.0",
     "fastmcp>=3.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

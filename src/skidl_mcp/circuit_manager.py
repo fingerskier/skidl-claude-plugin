@@ -43,6 +43,18 @@ class CircuitEntry:
     parts: dict[str, Part] = field(default_factory=dict)
     nets: dict[str, Net] = field(default_factory=dict)
     buses: dict[str, Bus] = field(default_factory=dict)
+    # Phase B: design metadata that persists to disk alongside the structure.
+    # ``requirements`` is free-form human intent; ``roles``/``interfaces`` are
+    # reserved semantic annotations (populated by later phases); ``metadata``
+    # carries unknown design.yaml keys through a load→save cycle unchanged.
+    requirements: str = ""
+    roles: dict[str, str] = field(default_factory=dict)
+    interfaces: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    # Project directory this circuit was last saved to / loaded from ("" if it
+    # has never been persisted). Records provenance; the manager's own
+    # ``project_root`` drives the default save/load path.
+    project_root: str = ""
 
     def summary(self) -> dict[str, Any]:
         """Return a JSON-serializable summary of this circuit."""
@@ -101,15 +113,41 @@ class CircuitManager:
     def __init__(self) -> None:
         self._circuits: dict[str, CircuitEntry] = {}
         self._active: str | None = None
+        self._project_root: str | None = None
 
     def reset(self) -> None:
         """Clear all circuits and reset state. Useful for testing."""
         self._circuits.clear()
         self._active = None
+        self._project_root = None
 
     @property
     def active_name(self) -> str | None:
         return self._active
+
+    @property
+    def project_root(self) -> str | None:
+        """Filesystem directory that is the current design's source of truth.
+
+        Set by ``open_project``/``save_circuit``/``load_circuit`` (Phase B) so a
+        later ``save_circuit()`` with no explicit path knows where to write.
+        """
+        return self._project_root
+
+    @project_root.setter
+    def project_root(self, value: str | None) -> None:
+        self._project_root = value
+
+    def install(self, entry: CircuitEntry, *, activate: bool = True) -> CircuitEntry:
+        """Register a pre-built entry (e.g. one restored from disk).
+
+        Replaces any existing circuit of the same name so loading from disk —
+        the source of truth — overwrites a stale in-memory copy.
+        """
+        self._circuits[entry.name] = entry
+        if activate:
+            self._active = entry.name
+        return entry
 
     def create(self, name: str, description: str = "") -> CircuitEntry:
         """Create a new named circuit and set it as active."""

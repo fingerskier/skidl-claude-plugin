@@ -291,65 +291,7 @@ def export_python(output_path: str | None = None) -> dict:
         if not entry.parts:
             return {"status": "error", "message": "Circuit has no parts."}
 
-        lines = [
-            "#!/usr/bin/env python3",
-            f'"""SKiDL circuit: {entry.name}',
-            f"",
-            f"{entry.description}",
-            f'"""',
-            "",
-            "from skidl import *",
-            "",
-            f"# Circuit: {entry.name}",
-            "",
-            "# --- Parts ---",
-        ]
-
-        # Build unique variable name mappings
-        seen_vars: set[str] = set()
-        part_vars: dict[str, str] = {}  # ref -> var_name
-        net_vars: dict[str, str] = {}   # net name -> var_name
-
-        # Emit part definitions
-        for ref, part in entry.parts.items():
-            var_name = _to_python_var(ref, seen_vars)
-            part_vars[ref] = var_name
-            lib = part_library_name(part, "Device") or "Device"
-            value = str(getattr(part, "value", "") or "")
-            footprint = str(getattr(part, "footprint", "") or "")
-            args = [repr(lib), repr(part.name)]
-            if value:
-                args.append(f"value={repr(value)}")
-            if footprint:
-                args.append(f"footprint={repr(footprint)}")
-            args.append(f"ref={repr(ref)}")
-            lines.append(f"{var_name} = Part({', '.join(args)})")
-
-        lines.append("")
-        lines.append("# --- Nets ---")
-
-        # Emit net definitions
-        for name, net in entry.nets.items():
-            var_name = _to_python_var(name, seen_vars)
-            net_vars[name] = var_name
-            lines.append(f"{var_name} = Net({repr(name)})")
-
-        lines.append("")
-        lines.append("# --- Connections ---")
-
-        # Emit connections
-        for name, net in entry.nets.items():
-            nvar = net_vars[name]
-            for pin in net.pins:
-                pvar = part_vars.get(pin.part.ref, pin.part.ref.lower())
-                lines.append(f"{nvar} += {pvar}[{repr(str(pin.num))}]  # {pin.name}")
-
-        lines.append("")
-        lines.append("# --- Generate outputs ---")
-        lines.append("generate_netlist()")
-        lines.append("")
-
-        code = "\n".join(lines)
+        code = circuit_to_python(entry)
 
         return finalize_artifact(
             code,
@@ -358,9 +300,78 @@ def export_python(output_path: str | None = None) -> dict:
             summary={
                 "parts": len(entry.parts),
                 "nets": len(entry.nets),
-                "lines": len(lines),
+                "lines": code.count("\n") + 1,
             },
             message=f"Python SKiDL code exported for circuit '{entry.name}'.",
         )
     except (RuntimeError, KeyError) as e:
         return {"status": "error", "message": str(e)}
+
+
+def circuit_to_python(entry) -> str:
+    """Render a CircuitEntry as runnable SKiDL Python source.
+
+    This is a human-facing *view* of the design (see ``export_python``): it
+    re-instantiates each part from its source library, so re-running the script
+    needs those libraries. It is NOT the load format — projects are reloaded from
+    the dependency-free ``circuit.json`` (see :mod:`skidl_mcp.tools.project_io`).
+    """
+    lines = [
+        "#!/usr/bin/env python3",
+        f'"""SKiDL circuit: {entry.name}',
+        f"",
+        f"{entry.description}",
+        f'"""',
+        "",
+        "from skidl import *",
+        "",
+        f"# Circuit: {entry.name}",
+        "",
+        "# --- Parts ---",
+    ]
+
+    # Build unique variable name mappings
+    seen_vars: set[str] = set()
+    part_vars: dict[str, str] = {}  # ref -> var_name
+    net_vars: dict[str, str] = {}   # net name -> var_name
+
+    # Emit part definitions
+    for ref, part in entry.parts.items():
+        var_name = _to_python_var(ref, seen_vars)
+        part_vars[ref] = var_name
+        lib = part_library_name(part, "Device") or "Device"
+        value = str(getattr(part, "value", "") or "")
+        footprint = str(getattr(part, "footprint", "") or "")
+        args = [repr(lib), repr(part.name)]
+        if value:
+            args.append(f"value={repr(value)}")
+        if footprint:
+            args.append(f"footprint={repr(footprint)}")
+        args.append(f"ref={repr(ref)}")
+        lines.append(f"{var_name} = Part({', '.join(args)})")
+
+    lines.append("")
+    lines.append("# --- Nets ---")
+
+    # Emit net definitions
+    for name, net in entry.nets.items():
+        var_name = _to_python_var(name, seen_vars)
+        net_vars[name] = var_name
+        lines.append(f"{var_name} = Net({repr(name)})")
+
+    lines.append("")
+    lines.append("# --- Connections ---")
+
+    # Emit connections
+    for name, net in entry.nets.items():
+        nvar = net_vars[name]
+        for pin in net.pins:
+            pvar = part_vars.get(pin.part.ref, pin.part.ref.lower())
+            lines.append(f"{nvar} += {pvar}[{repr(str(pin.num))}]  # {pin.name}")
+
+    lines.append("")
+    lines.append("# --- Generate outputs ---")
+    lines.append("generate_netlist()")
+    lines.append("")
+
+    return "\n".join(lines)

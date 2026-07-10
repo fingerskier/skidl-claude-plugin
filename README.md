@@ -12,6 +12,7 @@ MCP server for **schematic-as-code** circuit design using [SKiDL](https://github
 - **Validation** — Run electrical rules checks (ERC), verify connections and footprints
 - **BOM Generation** — Bill of materials in JSON or CSV format
 - **Code Export** — Export circuits as SKiDL Python scripts that recreate the design (re-running needs the parts' source libraries)
+- **Project Persistence** — Save a design to a project directory and reload it in a later session; a deterministic, git-diffable `circuit.json` is the source of truth
 - **16 Design Templates** — Prompt templates for common circuits (voltage dividers, amplifiers, filters, MCU designs, motor drivers, USB interfaces, and more)
 
 ## Prerequisites
@@ -156,6 +157,43 @@ Omit `output_path` to get the content inline (large artifacts are truncated with
 warning that points you at `output_path`). Prefer `output_path` for anything you
 intend to open in KiCad or keep on disk.
 
+### Project Persistence
+| Tool | Description |
+|------|-------------|
+| `open_project` | Open a project directory as the design's source of truth (loads it if it already holds a `circuit.json`) |
+| `save_circuit` | Save the active circuit to a project directory |
+| `load_circuit` | Reload a circuit from a project directory (structure only — never runs project code) |
+
+A **project directory** lets a design outlive the session. Saving writes:
+
+```
+my_project/
+  circuit.json    ← canonical structure — the authoritative source of truth (load reads this)
+  design.yaml     ← human metadata: name, description, requirements (edit by hand; unknown keys are preserved)
+  circuit.py      ← generated SKiDL view for reading/diffing (NOT the load format)
+  artifacts/      ← generator outputs (netlists, BOMs, SVGs, …)
+  worlds/         ← reserved for a later phase
+```
+
+Typical lifecycle:
+
+```
+open_project("~/designs/divider")   # create/open the project dir
+# …build parts, nets, connections…
+save_circuit()                      # writes circuit.json + design.yaml + circuit.py
+# …new session, nothing in memory…
+open_project("~/designs/divider")   # reloads the saved design, ready to keep editing
+```
+
+`circuit.json` is **deterministic and git-diffable**: refs are natural-sorted (so `R2`
+precedes `R10`), nets are sorted by name, pins by number, and there are no timestamps or
+random tags — saving the same circuit twice produces byte-identical output. Loading
+rebuilds the circuit from `circuit.json` **alone** and never imports or executes
+`circuit.py`, so opening a project directory can't run arbitrary code. Because load
+reconstructs library-independent parts from the stored pin table, it works offline with
+no KiCad install; regenerate `circuit.py` (via `export_python`) for a high-fidelity,
+library-backed rebuild when you have the symbol libraries.
+
 ### Validation
 | Tool | Description |
 |------|-------------|
@@ -179,7 +217,7 @@ Use these prompts to guide circuit design:
 
 ```bash
 pip install -e ".[dev]"     # see HOWTO.md §2 if the build trips on kinet2pcb/hierplace
-pytest                      # 101 tests; no PYTHONPATH needed
+pytest                      # 127 tests; no PYTHONPATH needed
 ```
 
 [HOWTO.md](./HOWTO.md) covers local setup (including the SKiDL transitive-dependency
