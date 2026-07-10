@@ -15,8 +15,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
+from skidl import KICAD, Circuit, Net, Part
 
+from skidl_mcp.circuit_manager import manager
+from skidl_mcp.tools import project_io
 from skidl_mcp.tools.nets import _find_pins
+from skidl_mcp.tools.project_io import restore_entry, serialize_entry
 
 
 class PatchError(ValueError):
@@ -227,3 +231,222 @@ def validate_patch(entry, patch: DesignPatch) -> list[str]:
                     f"'{net_name}'. Available: {list(entry.nets.keys())}"
                 )
     return errors
+
+
+# ── Application ──────────────────────────────────────────────────────────
+
+
+class _ApplyError(RuntimeError):
+    """A mutation failed after validation — triggers snapshot rollback."""
+
+
+def _empty_diff() -> dict:
+    return {
+        "parts_added": [], "parts_updated": [], "parts_removed": [],
+        "nets_created": [], "nets_removed": [],
+        "connections_added": 0, "connections_removed": 0,
+        "roles_set": [], "interfaces_set": [],
+    }
+
+
+def apply_design_patch(patch, dry_run: bool = False) -> dict:
+    """Apply a declarative, atomic, multi-entity change to the active circuit.
+
+    Args:
+        patch: a mapping or a YAML/JSON string (see module docstring for the shape).
+        dry_run: when True, validate and compute the diff but mutate nothing.
+
+    Returns the diff contract ``{status, applied, warnings[, dry_run, rolled_back,
+    errors]}``. A validation error mutates nothing; a mid-apply throw restores the
+    pre-patch snapshot and sets ``rolled_back: True``.
+    """
+    try:
+        entry = manager.get_active()
+    except RuntimeError as e:
+        return {"status": "error", "errors": [str(e)], "applied": _empty_diff()}
+
+    try:
+        parsed = DesignPatch.from_obj(patch)
+    except PatchError as e:
+        return {"status": "error", "errors": [str(e)], "applied": _empty_diff()}
+
+    errors = validate_patch(entry, parsed)
+    if errors:
+        return {"status": "error", "errors": errors, "applied": _empty_diff()}
+
+    diff = _empty_diff()
+    warnings: list[str] = []
+
+    if dry_run:
+        # Apply to a throwaway rebuilt from the snapshot; the live circuit is
+        # never touched. Part creation (needs KiCad) still runs on the copy.
+        temp = project_io.restore_entry(project_io.serialize_entry(entry), circuit=Circuit())
+        try:
+            _apply(temp, parsed, diff, warnings)
+        except _ApplyError as e:
+            return {"status": "error", "errors": [str(e)], "applied": _empty_diff()}
+        return {"status": "ok", "applied": diff, "warnings": warnings, "dry_run": True}
+
+    snapshot = serialize_entry(entry)
+    try:
+        _apply(entry, parsed, diff, warnings)
+    except Exception as e:  # noqa: BLE001 — validation should prevent this; defend anyway
+        _rollback(entry, snapshot)
+        return {
+            "status": "error", "rolled_back": True,
+            "errors": [f"Patch failed mid-apply and was rolled back: {e}"],
+            "applied": _empty_diff(),
+        }
+    return {"status": "ok", "applied": diff, "warnings": warnings}
+
+
+def _rollback(entry, snapshot: dict) -> None:
+    """Restore the active circuit to ``snapshot`` (taken before mutation).
+
+    ``_apply`` mutates ``entry`` in place (it *is* the live circuit, not a copy),
+    so a partial failure leaves ``entry`` — and any reference a caller already
+    holds to it, e.g. from an earlier ``manager.get_active()`` — part-mutated.
+    Rebuilding a fresh entry and swapping it into the manager by name would not
+    fix that stale reference, so instead we rebuild from the snapshot and copy
+    the restored structural state back onto the *same* ``entry`` object.
+    """
+    restored = restore_entry(snapshot, circuit=Circuit())
+    entry.circuit = restored.circuit
+    entry.name = restored.name
+    entry.description = restored.description
+    entry.parts = restored.parts
+    entry.nets = restored.nets
+    entry.buses = restored.buses
+    entry.roles = restored.roles
+    entry.interfaces = restored.interfaces
+    # created_at/requirements/metadata/project_root are not part of the
+    # structural snapshot (serialize_entry drops them) — they're already
+    # untouched on `entry`, so nothing to restore for those.
+    manager.install(entry, activate=True)
+
+
+# ── Mutation (all operate on the passed entry; order is deterministic) ──────
+
+
+def _apply(entry, patch: DesignPatch, diff: dict, warnings: list[str]) -> None:
+    _apply_remove_parts(entry, patch, diff)      # Task 4
+    _apply_remove_nets(entry, patch, diff)       # Task 4
+    _apply_disconnect(entry, patch, diff)        # Task 4
+    _apply_parts(entry, patch, diff)
+    _apply_nets(entry, patch, diff, warnings)
+    _apply_roles(entry, patch, diff)
+    _apply_interfaces(entry, patch, diff)
+
+
+def _apply_parts(entry, patch: DesignPatch, diff: dict) -> None:
+    for pp in patch.parts:
+        if pp.ref in entry.parts:
+            _update_part(entry.parts[pp.ref], pp, pp.ref, diff)
+        else:
+            kwargs = {"tool": KICAD, "ref": pp.ref}
+            if pp.value:
+                kwargs["value"] = pp.value
+            if pp.footprint:
+                kwargs["footprint"] = pp.footprint
+            try:
+                part = Part(pp.lib, pp.name, circuit=entry.circuit, **kwargs)
+            except Exception as e:  # noqa: BLE001 — external-library boundary
+                raise _ApplyError(
+                    f"Could not create part '{pp.ref}' from '{pp.lib}:{pp.name}': {e}"
+                ) from e
+            if pp.fields:
+                part.fields.update(pp.fields)
+            entry.parts[pp.ref] = part
+            diff["parts_added"].append(pp.ref)
+
+
+def _update_part(part, pp: PartPatch, ref: str, diff: dict) -> None:
+    changed = False
+    if pp.value and str(getattr(part, "value", "") or "") != pp.value:
+        part.value = pp.value
+        changed = True
+    if pp.footprint and str(getattr(part, "footprint", "") or "") != pp.footprint:
+        part.footprint = pp.footprint
+        changed = True
+    for k, v in pp.fields.items():
+        if str((part.fields or {}).get(k, "")) != v:
+            part.fields[k] = v
+            changed = True
+    if changed:
+        diff["parts_updated"].append(ref)
+
+
+def _apply_nets(entry, patch: DesignPatch, diff: dict, warnings: list[str]) -> None:
+    for np in patch.nets:
+        net = entry.nets.get(np.name)
+        if net is None:
+            net = Net(np.name, circuit=entry.circuit)
+            entry.nets[np.name] = net
+            diff["nets_created"].append(np.name)
+        added = _connect_net_pins(entry, net, np, warnings)
+        diff["connections_added"] += added
+        if np.pins_mode == "set":
+            diff["connections_removed"] += _prune_net_pins(net, entry, np)
+
+
+def _connect_net_pins(entry, net, np: NetPatch, warnings: list[str]) -> int:
+    """Connect each listed pin not already on ``net``; return count added."""
+    added = 0
+    for token in np.pins:
+        ref, pin_id = _split_token(token)
+        part = entry.parts.get(ref)
+        if part is None:  # created earlier in this same _apply pass
+            raise _ApplyError(f"net {np.name}: part '{ref}' missing at connect time.")
+        found = _find_pins(part, pin_id, ref)
+        if isinstance(found, dict):
+            raise _ApplyError(found["message"])
+        if len(found) > 1:
+            warnings.append(
+                f"Pin '{pin_id}' matched {len(found)} pins on {ref}; connected all.")
+        for pin in found:
+            if not any(p is pin for p in net.pins):
+                net += pin
+                added += 1
+    return added
+
+
+def _apply_roles(entry, patch: DesignPatch, diff: dict) -> None:
+    for pp in patch.parts:
+        if pp.role:
+            key = f"part:{pp.ref}"
+            if entry.roles.get(key) != pp.role:
+                entry.roles[key] = pp.role
+                diff["roles_set"].append(key)
+    for np in patch.nets:
+        if np.role:
+            key = f"net:{np.name}"
+            if entry.roles.get(key) != np.role:
+                entry.roles[key] = np.role
+                diff["roles_set"].append(key)
+
+
+def _apply_interfaces(entry, patch: DesignPatch, diff: dict) -> None:
+    for ip in patch.interfaces:
+        value = {"type": ip.type, "nets": dict(ip.nets)}
+        if entry.interfaces.get(ip.name) != value:
+            entry.interfaces[ip.name] = value
+            diff["interfaces_set"].append(ip.name)
+
+
+# ── Removal stubs (Task 4 implements these; harmless no-ops for now) ───────
+
+
+def _apply_remove_parts(entry, patch: DesignPatch, diff: dict) -> None:
+    ...  # implemented in Task 4
+
+
+def _apply_remove_nets(entry, patch: DesignPatch, diff: dict) -> None:
+    ...  # implemented in Task 4
+
+
+def _apply_disconnect(entry, patch: DesignPatch, diff: dict) -> None:
+    ...  # implemented in Task 4
+
+
+def _prune_net_pins(net, entry, np: NetPatch) -> int:
+    return 0  # implemented in Task 4
