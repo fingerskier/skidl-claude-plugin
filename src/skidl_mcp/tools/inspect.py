@@ -39,7 +39,7 @@ def inspect_design(by: str = "all", name: str = "", detail: str = "summary") -> 
     if by == "role":
         return _view_roles(entry, name)
     if by == "interface":
-        return _view_interfaces(entry, name)
+        return _view_interfaces(entry, name, detail)
     return _view_issues(entry)
 
 
@@ -98,6 +98,7 @@ def _view_all(entry, detail: str) -> dict:
         out["part_details"] = [_part_full(r, p, entry) for r, p in entry.parts.items()]
         out["net_details"] = [_net_full(n, x, entry) for n, x in entry.nets.items()]
         out["roles"] = dict(entry.roles)
+        out["interface_details"] = dict(entry.interfaces)
     return out
 
 
@@ -124,16 +125,21 @@ def _view_nets(entry, name: str, detail: str) -> dict:
 def _view_roles(entry, name: str) -> dict:
     roles = dict(entry.roles)
     if name:
-        roles = {k: v for k, v in roles.items() if k == name or v == name}
+        # Match the full storage key ("part:R1"), the role value ("pullup"),
+        # or the bare ref/name after the "part:"/"net:" prefix ("R1").
+        roles = {k: v for k, v in roles.items()
+                 if name in (k, v, k.split(":", 1)[-1])}
     return {"status": "ok", "roles": roles}
 
 
-def _view_interfaces(entry, name: str) -> dict:
+def _view_interfaces(entry, name: str, detail: str = "summary") -> dict:
     if name:
         if name not in entry.interfaces:
             return {"status": "error", "message": f"Interface '{name}' not found. Available: {list(entry.interfaces.keys())}"}
         return {"status": "ok", "interface": entry.interfaces[name]}
-    return {"status": "ok", "interfaces": dict(entry.interfaces)}
+    if detail == "full":
+        return {"status": "ok", "interfaces": dict(entry.interfaces)}
+    return {"status": "ok", "interfaces": list(entry.interfaces.keys())}
 
 
 def _view_issues(entry) -> dict:

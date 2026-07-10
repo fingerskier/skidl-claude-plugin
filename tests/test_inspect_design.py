@@ -86,3 +86,43 @@ class TestInspectDesign:
     def test_no_active_circuit_reports_error(self):
         res = inspect_design(by="all")
         assert res["status"] == "error"
+
+    def test_all_full_includes_part_net_role_and_interface_bindings(self):
+        _demo()
+        res = inspect_design(by="all", detail="full")
+        assert res["status"] == "ok"
+        # spec §8: full detail includes role/interface bindings (both)
+        assert res["roles"] == {"part:R1": "pullup", "net:SDA": "i2c_data"}
+        assert res["interface_details"] == {"i2c0": {"type": "i2c", "nets": {"sda": "SDA"}}}
+        assert any(p["ref"] == "R1" and p["role"] == "pullup" for p in res["part_details"])
+        assert any(n["name"] == "SDA" for n in res["net_details"])
+
+    def test_interface_listing_honors_detail(self):
+        _demo()
+        summary = inspect_design(by="interface", detail="summary")
+        assert summary["status"] == "ok"
+        assert summary["interfaces"] == ["i2c0"]  # names only (compact-output ethos)
+        full = inspect_design(by="interface", detail="full")
+        assert full["status"] == "ok"
+        assert full["interfaces"] == {"i2c0": {"type": "i2c", "nets": {"sda": "SDA"}}}
+
+    def test_role_filter_by_bare_ref(self):
+        _demo()
+        res = inspect_design(by="role", name="R1")
+        assert res["status"] == "ok"
+        assert res["roles"] == {"part:R1": "pullup"}
+
+    def test_part_not_found_reports_error_with_available(self):
+        _demo()
+        res = inspect_design(by="part", name="R99")
+        assert res["status"] == "error"
+        assert "R99" in res["message"]
+        assert "R1" in res["message"]
+
+    def test_part_listing_summary_and_full(self):
+        _demo()
+        summary = inspect_design(by="part", detail="summary")
+        assert set(summary["parts"]) == {"R1", "R2"}
+        full = inspect_design(by="part", detail="full")
+        assert full["status"] == "ok"
+        assert any(p["ref"] == "R1" for p in full["parts"])
