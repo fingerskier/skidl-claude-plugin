@@ -416,6 +416,80 @@ class TestRemovalPurgesAnnotations:
         assert entry.interfaces["if0"]["nets"] == {"a": "N", "b": "M"}
 
 
+class TestRemovalUnbussesNet:
+    """B4: removing a net that is a bus member must also drop it from entry.buses
+    (the same "keep parallel layers synced on removal" principle as B1's graph vs.
+    index sync and the roles/interfaces purge). Otherwise serialize_entry emits a
+    bus listing a net absent from the top-level nets section, and — because restore
+    rebuilt buses from (name, width) auto-naming — the removed member resurfaced on
+    reload, so the removal did not stick across save/load."""
+
+    def _bus_circuit(self):
+        """Active circuit 'c' with a 4-wide bus DATA (nets DATA0..DATA3)."""
+        circuit.create_circuit("c")
+        nets.create_bus("DATA", 4)
+        return manager.get_active()
+
+    def test_remove_bus_member_net_unbusses_it(self):
+        entry = self._bus_circuit()
+        assert "DATA1" in entry.nets
+        res = apply_design_patch({"remove_nets": ["DATA1"]})
+        assert res["status"] == "ok"
+        assert res["applied"]["nets_removed"] == ["DATA1"]
+        assert "DATA1" not in entry.nets
+        # The bus no longer holds the removed net; the survivors keep their names.
+        assert [n.name for n in entry.buses["DATA"]] == ["DATA0", "DATA2", "DATA3"]
+        assert len(entry.buses["DATA"]) == 3
+
+    def test_serialized_bus_has_no_member_absent_from_nets(self):
+        entry = self._bus_circuit()
+        apply_design_patch({"remove_nets": ["DATA1"]})
+        model = project_io.serialize_entry(entry)
+        net_names = {n["name"] for n in model["nets"]}
+        bus = next(b for b in model["buses"] if b["name"] == "DATA")
+        assert "DATA1" not in bus["nets"]
+        assert bus["width"] == 3
+        # No bus member may reference a net missing from the top-level nets section.
+        assert all(member in net_names for member in bus["nets"])
+
+    def test_unbussing_survives_save_load_roundtrip(self):
+        entry = self._bus_circuit()
+        apply_design_patch({"remove_nets": ["DATA1"]})
+        restored = project_io.restore_entry(project_io.serialize_entry(entry))
+        # The removed member must NOT resurrect via (name, width) auto-naming.
+        assert [n.name for n in restored.buses["DATA"]] == ["DATA0", "DATA2", "DATA3"]
+        assert "DATA1" not in restored.nets
+
+    def test_full_bus_still_round_trips(self):
+        # Guard: the un-bus/restore rework must not change an untouched full bus.
+        entry = self._bus_circuit()
+        restored = project_io.restore_entry(project_io.serialize_entry(entry))
+        assert [n.name for n in restored.buses["DATA"]] == \
+            ["DATA0", "DATA1", "DATA2", "DATA3"]
+
+    def test_dry_run_remove_bus_member_does_not_mutate_live_bus(self):
+        entry = self._bus_circuit()
+        res = apply_design_patch({"remove_nets": ["DATA1"]}, dry_run=True)
+        assert res["status"] == "ok" and res.get("dry_run") is True
+        assert [n.name for n in entry.buses["DATA"]] == \
+            ["DATA0", "DATA1", "DATA2", "DATA3"]
+        assert "DATA1" in entry.nets
+
+    def test_rolled_back_remove_bus_member_restores_bus(self, monkeypatch):
+        entry = self._bus_circuit()
+        import skidl_mcp.tools.design_patch as dp
+
+        def boom(*a, **k):  # explode at the parts step (after remove_nets)
+            raise RuntimeError("injected failure")
+        monkeypatch.setattr(dp, "_apply_parts", boom)
+
+        res = apply_design_patch({"remove_nets": ["DATA1"]})
+        assert res["status"] == "error" and res.get("rolled_back") is True
+        assert [n.name for n in entry.buses["DATA"]] == \
+            ["DATA0", "DATA1", "DATA2", "DATA3"]
+        assert "DATA1" in entry.nets
+
+
 class TestDuplicateRemovalRefs:
     """B2: duplicate/absent removal refs must be idempotent no-ops, and the
     dry_run path must catch a mid-apply throw the same way the live path does."""

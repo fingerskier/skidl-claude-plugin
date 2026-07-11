@@ -491,6 +491,11 @@ def _apply_remove_nets(entry, patch: DesignPatch, diff: dict) -> None:
             pin.disconnect()
         entry.circuit.rmv_nets(net)  # keep the SKiDL graph in sync with the index
         del entry.nets[name]
+        # Keep the bus layer in sync too (B4): a removed net that was a bus member
+        # must leave the bus, else serialize_entry emits a bus listing a net absent
+        # from the top-level nets section and restore resurrects it (same desync
+        # class as B1's graph/index sync).
+        _unbus_net(entry, net)
         # Keep the annotation layer in sync: drop the net's role and any interface
         # net-mapping that pointed at it (interfaces are kept even if emptied, to
         # avoid a second, unnamed destructive edit — see spec §2).
@@ -506,6 +511,20 @@ def _purge_net_from_interfaces(entry, net_name: str) -> None:
         if isinstance(mapping, dict):
             for logical in [k for k, v in mapping.items() if v == net_name]:
                 del mapping[logical]
+
+
+def _unbus_net(entry, net) -> None:
+    """Remove ``net`` from any bus that holds it (B4).
+
+    SKiDL's ``Bus`` exposes its members as a plain ``bus.nets`` list with no
+    removal method, so we rebuild that list without ``net``; ``len(bus)`` and
+    iteration follow the reassignment. Match by identity — ``net`` is the same
+    object the index and the bus both reference. A bus emptied by this is left in
+    place rather than deleted: dropping a named bus would be a second, unnamed
+    destructive edit, mirroring how emptied interfaces are kept (spec §2)."""
+    for bus in entry.buses.values():
+        if any(member is net for member in bus.nets):
+            bus.nets = [member for member in bus.nets if member is not net]
 
 
 def _apply_disconnect(entry, patch: DesignPatch, diff: dict) -> None:

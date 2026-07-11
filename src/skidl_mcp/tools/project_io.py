@@ -246,13 +246,25 @@ def restore_entry(data: dict, *, circuit: Circuit | None = None) -> CircuitEntry
         part = _restore_part(part_data, circuit)
         entry.parts[part.ref] = part
 
-    # 2) Buses next: each Bus creates its own member nets; register those so the
-    #    net pass below reuses them instead of creating duplicates. Member nets are
-    #    reconstructed from SKiDL's deterministic (name, width) auto-naming in this
-    #    fresh circuit; the stored ``bus_data["nets"]`` names are retained in
-    #    circuit.json for readability/forward-compat but are not needed to restore.
+    # 2) Buses next: register their member nets so the net pass below reuses them
+    #    instead of creating duplicates. Rebuild from the stored member NAMES when
+    #    present (get-or-create each net, then Bus(name, *nets)): SKiDL's (name,
+    #    width) auto-naming would renumber members contiguously and so resurrect a
+    #    net that remove_nets un-bussed from the middle of a bus (B4). Fall back to
+    #    width auto-naming only for an older/hand-authored file that omits ``nets``.
     for bus_data in data.get("buses", []):
-        bus = Bus(bus_data["name"], int(bus_data.get("width", 0)), circuit=circuit)
+        member_names = bus_data.get("nets") or []
+        if member_names:
+            members = []
+            for nm in member_names:
+                net = entry.nets.get(nm)
+                if net is None:
+                    net = Net(nm, circuit=circuit)
+                    entry.nets[nm] = net
+                members.append(net)
+            bus = Bus(bus_data["name"], *members, circuit=circuit)
+        else:
+            bus = Bus(bus_data["name"], int(bus_data.get("width", 0)), circuit=circuit)
         entry.buses[bus_data["name"]] = bus
         for net in bus:
             entry.nets[net.name] = net
