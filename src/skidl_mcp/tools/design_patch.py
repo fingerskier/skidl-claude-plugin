@@ -313,7 +313,7 @@ def apply_design_patch(patch, dry_run: bool = False) -> dict:
         temp = project_io.restore_entry(project_io.serialize_entry(entry), circuit=Circuit())
         try:
             _apply(temp, parsed, diff, warnings)
-        except _ApplyError as e:
+        except Exception as e:  # noqa: BLE001 — symmetric with the live path below
             return {"status": "error", "errors": [str(e)], "applied": _empty_diff()}
         return {"status": "ok", "applied": diff, "warnings": warnings, "dry_run": True}
 
@@ -468,7 +468,9 @@ def _apply_interfaces(entry, patch: DesignPatch, diff: dict) -> None:
 
 def _apply_remove_parts(entry, patch: DesignPatch, diff: dict) -> None:
     for ref in patch.remove_parts:
-        part = entry.parts[ref]
+        part = entry.parts.get(ref)
+        if part is None:  # already removed (e.g. duplicate ref) — idempotent no-op
+            continue
         for pin in part.pins:
             pin.disconnect()
         entry.circuit.rmv_parts(part)
@@ -478,9 +480,12 @@ def _apply_remove_parts(entry, patch: DesignPatch, diff: dict) -> None:
 
 def _apply_remove_nets(entry, patch: DesignPatch, diff: dict) -> None:
     for name in patch.remove_nets:
-        net = entry.nets[name]
+        net = entry.nets.get(name)
+        if net is None:  # already removed (e.g. duplicate ref) — idempotent no-op
+            continue
         for pin in list(net.pins):
             pin.disconnect()
+        entry.circuit.rmv_nets(net)  # keep the SKiDL graph in sync with the index
         del entry.nets[name]
         diff["nets_removed"].append(name)
 

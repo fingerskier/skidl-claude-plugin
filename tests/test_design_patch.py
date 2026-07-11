@@ -307,7 +307,66 @@ class TestRemovals:
         assert res["status"] == "ok"
         # add mode never prunes; R2.1 stays.
         assert res["applied"]["connections_removed"] == 0
+        assert res["applied"]["connections_added"] == 1  # R1.2 joined N
         assert entry.parts["R2"].pins[0].is_connected()
+
+    def test_remove_nets_purges_net_from_circuit_graph(self):
+        # B1: removal must drop the net from the SKiDL circuit graph, not only
+        # from the entry index — a zombie net collides when a later net reuses
+        # the name (SKiDL renames the new one 'N1'), desyncing index vs. generators.
+        entry = self._wired()
+        apply_design_patch({"remove_nets": ["N"]})
+        assert "N" not in [x.name for x in entry.circuit.nets]
+
+    def test_remove_then_recreate_same_net_name_keeps_name(self):
+        # B1 end-to-end: remove 'N', then re-add a net named 'N'. Without
+        # rmv_nets the zombie 'N' survives and the new one becomes 'N1'.
+        entry = self._wired()
+        apply_design_patch({"remove_nets": ["N"]})
+        res = apply_design_patch({"nets": [{"name": "N", "pins": ["R2.1"]}]})
+        assert res["status"] == "ok"
+        assert entry.nets["N"].name == "N"
+        assert "N1" not in [x.name for x in entry.circuit.nets]
+
+
+class TestDuplicateRemovalRefs:
+    """B2: duplicate/absent removal refs must be idempotent no-ops, and the
+    dry_run path must catch a mid-apply throw the same way the live path does."""
+
+    def test_duplicate_remove_parts_is_idempotent(self):
+        entry = _two_resistors()
+        res = apply_design_patch({"remove_parts": ["R2", "R2"]})
+        assert res["status"] == "ok"
+        assert res["applied"]["parts_removed"] == ["R2"]
+        assert "R2" not in entry.parts
+
+    def test_duplicate_remove_nets_is_idempotent(self):
+        _two_resistors()
+        apply_design_patch({"nets": [{"name": "N", "pins": ["R1.1"]}]})
+        entry = manager.get_active()
+        res = apply_design_patch({"remove_nets": ["N", "N"]})
+        assert res["status"] == "ok"
+        assert res["applied"]["nets_removed"] == ["N"]
+        assert "N" not in entry.nets
+
+    def test_dry_run_duplicate_remove_does_not_crash(self):
+        _two_resistors()
+        res = apply_design_patch({"remove_parts": ["R2", "R2"]}, dry_run=True)
+        assert res["status"] == "ok"
+        assert res["applied"]["parts_removed"] == ["R2"]
+
+    def test_dry_run_catches_unexpected_throw(self, monkeypatch):
+        _two_resistors()
+        import skidl_mcp.tools.design_patch as dp
+
+        def boom(*a, **k):
+            raise RuntimeError("injected failure")
+        monkeypatch.setattr(dp, "_connect_net_pins", boom)
+
+        res = apply_design_patch(
+            {"nets": [{"name": "N", "pins": ["R1.1"]}]}, dry_run=True)
+        assert res["status"] == "error"
+        assert any("injected failure" in e for e in res["errors"])
 
 
 class TestCrossFieldValidation:
