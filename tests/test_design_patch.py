@@ -489,6 +489,30 @@ class TestRemovalUnbussesNet:
             ["DATA0", "DATA1", "DATA2", "DATA3"]
         assert "DATA1" in entry.nets
 
+    def test_unbussing_all_members_leaves_empty_bus_that_round_trips(self):
+        # Emptying a bus by removing every member leaves it in place (not deleted,
+        # per spec §2) and must round-trip through the width-0 restore fallback.
+        circuit.create_circuit("c")
+        nets.create_bus("B", 2)  # B0, B1
+        apply_design_patch({"remove_nets": ["B0", "B1"]})
+        entry = manager.get_active()
+        assert len(entry.buses["B"]) == 0
+        restored = project_io.restore_entry(project_io.serialize_entry(entry))
+        assert len(restored.buses["B"]) == 0
+        assert "B0" not in restored.nets and "B1" not in restored.nets
+
+    def test_unbussing_preserves_sibling_pin_connections_across_roundtrip(self):
+        # Un-bussing one member must not disturb the pins wired onto its siblings;
+        # restore reuses the bus-created net by name when the top-level nets pass
+        # attaches pins to it.
+        entry = _two_resistors()          # R1, R2 (bare, pins 1 & 2)
+        nets.create_bus("D", 4)           # D0..D3
+        apply_design_patch({"nets": [{"name": "D0", "pins": ["R1.1"]}]})
+        apply_design_patch({"remove_nets": ["D2"]})
+        restored = project_io.restore_entry(project_io.serialize_entry(entry))
+        assert [n.name for n in restored.buses["D"]] == ["D0", "D1", "D3"]
+        assert [p.num for p in restored.nets["D0"].pins] == ["1"]
+
 
 class TestDuplicateRemovalRefs:
     """B2: duplicate/absent removal refs must be idempotent no-ops, and the
