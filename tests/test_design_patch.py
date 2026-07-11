@@ -282,6 +282,13 @@ class TestRemovals:
         assert not entry.parts["R1"].pins[0].is_connected()
         assert entry.parts["R1"].pins[1].is_connected()
 
+    def test_disconnect_already_unconnected_pin_is_noop(self):
+        entry = self._wired()  # R2.2 is not on any net
+        res = apply_design_patch({"disconnect": ["R2.2"]})
+        assert res["status"] == "ok"
+        # the is_connected() guard means an already-free pin removes nothing
+        assert res["applied"]["connections_removed"] == 0
+
     def test_disconnect_specific_pin_only(self):
         entry = self._wired()
         res = apply_design_patch({"disconnect": ["R1.1"]})
@@ -367,6 +374,132 @@ class TestDuplicateRemovalRefs:
             {"nets": [{"name": "N", "pins": ["R1.1"]}]}, dry_run=True)
         assert res["status"] == "error"
         assert any("injected failure" in e for e in res["errors"])
+
+
+def _graph_fingerprint(entry):
+    """Net→pins fingerprint read from entry.circuit (the generators' source of
+    truth), independent of the entry.nets index. Nets with no pins (e.g. SKiDL's
+    '__NOCONNECT') are dropped. This is what a netlist encodes, computed offline."""
+    fp = {}
+    for net in entry.circuit.nets:
+        pins = sorted((p.part.ref, str(p.num)) for p in net.pins)
+        if pins:
+            fp[net.name] = pins
+    return fp
+
+
+class TestArtifactEquivalence:
+    """Spec §10.1 / §11: a patch-built circuit must produce the SAME artifact as
+    the equivalent low-level construction. Compares the circuit graph (what the
+    netlist/SVG generators read) — not just the serialize_entry index — so a
+    graph/index desync (e.g. a lingering removed net) cannot pass unseen."""
+
+    def test_circuit_graph_equivalence_low_level_vs_patch(self):
+        # Circuit A: I2C-style pull-ups wired with low-level tools.
+        circuit.create_circuit("a")
+        a = manager.get_active()
+        for ref in ("R1", "R2"):
+            p = Part(name="R", tool=SKIDL,
+                     pins=[Pin(num=1, name="p1"), Pin(num=2, name="p2")],
+                     circuit=a.circuit, ref=ref)
+            a.parts[ref] = p
+        nets.create_net("SDA")
+        nets.connect("SDA", "R1", "1")
+        nets.connect("SDA", "R2", "1")
+        fp_a = _graph_fingerprint(a)
+
+        # Circuit B: same bare parts, one patch does the wiring.
+        manager.reset()
+        circuit.create_circuit("b")
+        b = manager.get_active()
+        for ref in ("R1", "R2"):
+            p = Part(name="R", tool=SKIDL,
+                     pins=[Pin(num=1, name="p1"), Pin(num=2, name="p2")],
+                     circuit=b.circuit, ref=ref)
+            b.parts[ref] = p
+        res = apply_design_patch({"nets": [{"name": "SDA", "pins": ["R1.1", "R2.1"]}]})
+        assert res["status"] == "ok"
+        assert _graph_fingerprint(b) == fp_a
+
+    def test_graph_matches_index_after_remove_and_recreate(self):
+        # A remove-then-recreate sequence must leave the circuit graph and the
+        # entry.nets index describing the SAME nets (regression guard for B1).
+        _two_resistors()
+        apply_design_patch({"nets": [{"name": "N", "pins": ["R1.1", "R2.1"]}]})
+        apply_design_patch({"remove_nets": ["N"]})
+        entry = manager.get_active()
+        apply_design_patch({"nets": [{"name": "N", "pins": ["R1.2"]}]})
+        graph_names = {n.name for n in entry.circuit.nets if n.pins}
+        index_names = {net.name for net in entry.nets.values()}
+        assert graph_names == index_names == {"N"}
+
+
+class TestUpdatePartBranches:
+    """Spec §4: _update_part sets value, footprint, and custom fields."""
+
+    def test_update_footprint_and_fields(self):
+        entry = _two_resistors()
+        res = apply_design_patch({"parts": [{
+            "ref": "R1",
+            "footprint": "Resistor_SMD:R_0805_2012Metric",
+            "fields": {"Tolerance": "1%", "MPN": "RC0805"},
+        }]})
+        assert res["status"] == "ok"
+        assert res["applied"]["parts_updated"] == ["R1"]
+        assert str(entry.parts["R1"].footprint) == "Resistor_SMD:R_0805_2012Metric"
+        assert entry.parts["R1"].fields["Tolerance"] == "1%"
+        assert entry.parts["R1"].fields["MPN"] == "RC0805"
+
+    def test_update_is_idempotent_for_footprint_and_fields(self):
+        _two_resistors()
+        patch = {"parts": [{"ref": "R1", "footprint": "F:R_0805",
+                            "fields": {"Tolerance": "1%"}}]}
+        apply_design_patch(patch)
+        second = apply_design_patch(patch)
+        assert second["applied"]["parts_updated"] == []  # nothing re-changed
+
+
+class TestMultiMatchAndNoCircuit:
+    def test_multi_match_pin_name_warns_and_connects_all(self):
+        # Spec §4.1: a pin *name* shared by several pins connects all, with a warning.
+        circuit.create_circuit("c")
+        entry = manager.get_active()
+        p = Part(name="R", tool=SKIDL,
+                 pins=[Pin(num=1, name="io"), Pin(num=2, name="io")],
+                 circuit=entry.circuit, ref="R1")
+        entry.parts["R1"] = p
+        res = apply_design_patch({"nets": [{"name": "N", "pins": ["R1.io"]}]})
+        assert res["status"] == "ok"
+        assert res["applied"]["connections_added"] == 2
+        assert any("matched 2 pins" in w for w in res["warnings"])
+
+    def test_apply_with_no_active_circuit_errors(self):
+        # Spec §7: no active circuit -> error dict, no crash.
+        res = apply_design_patch({"nets": [{"name": "N"}]})
+        assert res["status"] == "error"
+        assert res["errors"]
+
+    def test_malformed_patch_via_apply_returns_error_dict(self):
+        _two_resistors()
+        res = apply_design_patch("parts: [unclosed")  # bad YAML -> PatchError caught
+        assert res["status"] == "error"
+        assert res["errors"]
+
+
+class TestPerEntityValidationErrors:
+    def test_multiple_bad_entities_each_reported(self):
+        # Spec §11: actionable per-entity errors — one message per defect.
+        entry = _two_resistors()
+        res = apply_design_patch({
+            "nets": [{"name": "N", "pins": ["R1.99"]}],   # bad pin
+            "remove_parts": ["R9"],                        # missing part
+            "disconnect": ["R8.1"],                        # unknown ref
+        })
+        assert res["status"] == "error"
+        assert len(res["errors"]) >= 3
+        assert any("R1.99" in e for e in res["errors"])
+        assert any("R9" in e for e in res["errors"])
+        assert any("R8" in e for e in res["errors"])
 
 
 class TestCrossFieldValidation:

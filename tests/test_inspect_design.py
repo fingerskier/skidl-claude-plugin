@@ -126,3 +126,52 @@ class TestInspectDesign:
         full = inspect_design(by="part", detail="full")
         assert full["status"] == "ok"
         assert any(p["ref"] == "R1" for p in full["parts"])
+
+    def test_net_listing_summary_and_full(self):
+        _demo()
+        summary = inspect_design(by="net", detail="summary")
+        assert summary["status"] == "ok"
+        assert summary["nets"] == ["SDA"]  # names only
+        full = inspect_design(by="net", detail="full")
+        assert full["status"] == "ok"
+        assert any(n["name"] == "SDA" for n in full["nets"])
+
+    def test_net_not_found_reports_error_with_available(self):
+        _demo()
+        res = inspect_design(by="net", name="NOPE")
+        assert res["status"] == "error"
+        assert "NOPE" in res["message"]
+        assert "SDA" in res["message"]
+
+    def test_interface_not_found_reports_error_with_available(self):
+        _demo()
+        res = inspect_design(by="interface", name="spi0")
+        assert res["status"] == "error"
+        assert "spi0" in res["message"]
+        assert "i2c0" in res["message"]
+
+    def test_role_filter_by_value(self):
+        _demo()
+        # name matches the role *value*, not the key or bare ref.
+        res = inspect_design(by="role", name="pullup")
+        assert res["status"] == "ok"
+        assert res["roles"] == {"part:R1": "pullup"}
+
+    def test_role_filter_by_full_storage_key(self):
+        _demo()
+        res = inspect_design(by="role", name="net:SDA")
+        assert res["status"] == "ok"
+        assert res["roles"] == {"net:SDA": "i2c_data"}
+
+    def test_issues_includes_erc_subdict_when_parts_present(self):
+        _demo()
+        res = inspect_design(by="issues")
+        assert res["status"] == "ok"
+        assert "erc" in res
+        assert set(res["erc"]) == {"passed", "errors", "warnings"}
+
+    def test_issues_on_empty_circuit_omits_erc(self):
+        circuit.create_circuit("empty")
+        res = inspect_design(by="issues")
+        assert res["status"] == "ok"
+        assert "erc" not in res  # ERC needs parts; skipped on an empty circuit
