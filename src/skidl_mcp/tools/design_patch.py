@@ -475,6 +475,10 @@ def _apply_remove_parts(entry, patch: DesignPatch, diff: dict) -> None:
             pin.disconnect()
         entry.circuit.rmv_parts(part)
         del entry.parts[ref]
+        # Purge the annotation layer too, so a later part reusing this ref does
+        # not silently inherit the deleted part's role (symmetric with B1's
+        # graph/index sync). A same-patch re-create re-sets its role in step 4.
+        entry.roles.pop(f"part:{ref}", None)
         diff["parts_removed"].append(ref)
 
 
@@ -487,7 +491,21 @@ def _apply_remove_nets(entry, patch: DesignPatch, diff: dict) -> None:
             pin.disconnect()
         entry.circuit.rmv_nets(net)  # keep the SKiDL graph in sync with the index
         del entry.nets[name]
+        # Keep the annotation layer in sync: drop the net's role and any interface
+        # net-mapping that pointed at it (interfaces are kept even if emptied, to
+        # avoid a second, unnamed destructive edit — see spec §2).
+        entry.roles.pop(f"net:{name}", None)
+        _purge_net_from_interfaces(entry, name)
         diff["nets_removed"].append(name)
+
+
+def _purge_net_from_interfaces(entry, net_name: str) -> None:
+    """Drop any interface logical->net mapping that points at ``net_name``."""
+    for iface in entry.interfaces.values():
+        mapping = iface.get("nets")
+        if isinstance(mapping, dict):
+            for logical in [k for k, v in mapping.items() if v == net_name]:
+                del mapping[logical]
 
 
 def _apply_disconnect(entry, patch: DesignPatch, diff: dict) -> None:

@@ -336,6 +336,50 @@ class TestRemovals:
         assert "N1" not in [x.name for x in entry.circuit.nets]
 
 
+class TestRemovalPurgesAnnotations:
+    """Removal must keep the roles/interfaces annotation layer in sync with the
+    part/net layer — the same desync class as B1 (graph vs. index), one layer up.
+    A removed entity must not leave a dangling role or interface net-mapping, and
+    a later part reusing the removed ref must NOT inherit the deleted role."""
+
+    def test_remove_part_purges_its_role(self):
+        entry = _two_resistors()
+        apply_design_patch({"parts": [{"ref": "R1", "role": "sense"}]})
+        assert entry.roles.get("part:R1") == "sense"
+        apply_design_patch({"remove_parts": ["R1"]})
+        assert "part:R1" not in entry.roles
+
+    def test_recreated_part_ref_does_not_inherit_stale_role(self):
+        entry = _two_resistors()
+        apply_design_patch({"parts": [{"ref": "R1", "role": "sense"}]})
+        apply_design_patch({"remove_parts": ["R1"]})
+        # A fresh part reusing ref R1 (bare rebuild — offline-safe).
+        p = Part(name="R", tool=SKIDL,
+                 pins=[Pin(num=1, name="p1"), Pin(num=2, name="p2")],
+                 circuit=entry.circuit, ref="R1")
+        entry.parts["R1"] = p
+        assert entry.roles.get("part:R1") is None  # not the deleted part's "sense"
+
+    def test_remove_net_purges_its_role(self):
+        _two_resistors()
+        apply_design_patch({"nets": [{"name": "N", "role": "sig", "pins": ["R1.1"]}]})
+        entry = manager.get_active()
+        assert entry.roles.get("net:N") == "sig"
+        apply_design_patch({"remove_nets": ["N"]})
+        assert "net:N" not in entry.roles
+
+    def test_remove_net_purges_dangling_interface_mapping(self):
+        _two_resistors()
+        apply_design_patch({
+            "nets": [{"name": "N", "pins": ["R1.1"]}, {"name": "M", "pins": ["R1.2"]}],
+            "interfaces": [{"name": "if0", "type": "sig", "nets": {"a": "N", "b": "M"}}],
+        })
+        entry = manager.get_active()
+        apply_design_patch({"remove_nets": ["N"]})
+        # if0 must no longer claim to use the removed net N; 'b'->M is untouched.
+        assert entry.interfaces["if0"]["nets"] == {"b": "M"}
+
+
 class TestDuplicateRemovalRefs:
     """B2: duplicate/absent removal refs must be idempotent no-ops, and the
     dry_run path must catch a mid-apply throw the same way the live path does."""
