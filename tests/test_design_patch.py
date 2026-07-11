@@ -379,6 +379,42 @@ class TestRemovalPurgesAnnotations:
         # if0 must no longer claim to use the removed net N; 'b'->M is untouched.
         assert entry.interfaces["if0"]["nets"] == {"b": "M"}
 
+    def _entry_with_interface(self):
+        """R1/R2 wired to nets N & M, with interface if0 mapping a->N, b->M."""
+        _two_resistors()
+        apply_design_patch({
+            "nets": [{"name": "N", "pins": ["R1.1"]}, {"name": "M", "pins": ["R1.2"]}],
+            "interfaces": [{"name": "if0", "type": "sig", "nets": {"a": "N", "b": "M"}}],
+        })
+        return manager.get_active()
+
+    def test_dry_run_remove_net_does_not_mutate_live_interface(self):
+        # The interface purge must not leak into the live circuit under dry_run.
+        # (serialize_entry must decouple interface inner dicts, else the dry_run
+        # temp aliases the live entry's mapping and del corrupts it in place.)
+        entry = self._entry_with_interface()
+        res = apply_design_patch({"remove_nets": ["N"]}, dry_run=True)
+        assert res["status"] == "ok" and res.get("dry_run") is True
+        # Live interface is untouched: dry_run mutates nothing.
+        assert entry.interfaces["if0"]["nets"] == {"a": "N", "b": "M"}
+
+    def test_rolled_back_remove_net_restores_interface_mapping(self, monkeypatch):
+        # Atomicity: a mid-apply throw AFTER the interface purge must fully
+        # restore the interface mapping. (The pre-mutation snapshot must not
+        # share interface inner dicts with the live entry, else the in-place
+        # purge corrupts the snapshot and rollback can't restore a->N.)
+        entry = self._entry_with_interface()
+        import skidl_mcp.tools.design_patch as dp
+
+        def boom(*a, **k):  # explode at the parts step (after remove_nets)
+            raise RuntimeError("injected failure")
+        monkeypatch.setattr(dp, "_apply_parts", boom)
+
+        res = apply_design_patch({"remove_nets": ["N"]})
+        assert res["status"] == "error" and res.get("rolled_back") is True
+        # The whole patch failed, so if0 must be exactly as before.
+        assert entry.interfaces["if0"]["nets"] == {"a": "N", "b": "M"}
+
 
 class TestDuplicateRemovalRefs:
     """B2: duplicate/absent removal refs must be idempotent no-ops, and the

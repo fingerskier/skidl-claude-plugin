@@ -26,6 +26,7 @@ for high-fidelity regeneration against real KiCad libraries.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -152,8 +153,14 @@ def serialize_entry(entry: CircuitEntry) -> dict:
         "nets": nets,
         "buses": buses,
         # Reserved semantic annotations (empty until a later phase populates them).
+        # Role values are immutable strings, but interface values are nested
+        # mutable dicts ({"type", "nets"}); deep-copy them so the returned model
+        # never aliases the live entry. apply_design_patch relies on this: it holds
+        # this dict as the pre-mutation rollback snapshot and rebuilds the dry_run
+        # scratch entry from it, and an in-place interface purge during _apply must
+        # not reach back through a shared reference and corrupt either one.
         "roles": {k: entry.roles[k] for k in sorted(entry.roles)},
-        "interfaces": {k: entry.interfaces[k] for k in sorted(entry.interfaces)},
+        "interfaces": {k: copy.deepcopy(entry.interfaces[k]) for k in sorted(entry.interfaces)},
     }
 
 
